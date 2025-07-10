@@ -1,11 +1,12 @@
 import React from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Link, Tabs } from 'expo-router';
-import { Pressable } from 'react-native';
+import { Pressable, View, Text, TouchableOpacity, useColorScheme } from 'react-native';
+import { useAuth } from '@/lib/auth-context';
 
 import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+import AuthGuard from '@/components/AuthGuard';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
@@ -15,45 +16,71 @@ function TabBarIcon(props: {
   return <FontAwesome size={28} style={{ marginBottom: -3 }} {...props} />;
 }
 
+const COLORS = {
+  light: {
+    tabBarBg: '#fff',
+    tabBarBorder: '#e5e7eb',
+    tabBarActive: '#007AFF',
+    tabBarInactive: '#666',
+  },
+  dark: {
+    tabBarBg: '#18181b',
+    tabBarBorder: '#27272a',
+    tabBarActive: '#60a5fa',
+    tabBarInactive: '#a1a1aa',
+  },
+};
+
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const C = COLORS[colorScheme ?? 'light'];
+  const { logout } = useAuth();
 
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        // Disable the static render of the header on web
-        // to prevent a hydration error in React Navigation v6.
-        headerShown: useClientOnlyValue(false, true),
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Tab One',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
-          headerRight: () => (
-            <Link href="/modal" asChild>
-              <Pressable>
-                {({ pressed }) => (
-                  <FontAwesome
-                    name="info-circle"
-                    size={25}
-                    color={Colors[colorScheme ?? 'light'].text}
-                    style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
-                  />
-                )}
-              </Pressable>
-            </Link>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="two"
-        options={{
-          title: 'Tab Two',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
-        }}
-      />
-    </Tabs>
+    <AuthGuard>
+      <Tabs
+        screenOptions={{
+          tabBarActiveTintColor: C.tabBarActive,
+          tabBarInactiveTintColor: C.tabBarInactive,
+          tabBarStyle: { backgroundColor: C.tabBarBg, borderTopColor: C.tabBarBorder },
+          headerShown: useClientOnlyValue(false, true),
+        }}>
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: 'Feed',
+            tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="explore"
+          options={{
+            title: 'Explore',
+            tabBarIcon: ({ color }) => <TabBarIcon name="search" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="create"
+          options={{
+            title: 'Create',
+            tabBarIcon: ({ color }) => <TabBarIcon name="plus" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="notifications"
+          options={{
+            title: 'Notifications',
+            tabBarIcon: ({ color }) => <TabBarIcon name="bell" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: 'Profile',
+            tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />,
+          }}
+        />
+      </Tabs>
+    </AuthGuard>
   );
 }
