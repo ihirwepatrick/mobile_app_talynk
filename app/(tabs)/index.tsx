@@ -13,6 +13,7 @@ import {
   StatusBar,
   SafeAreaView,
   Share,
+  Animated,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { router } from 'expo-router';
@@ -114,7 +115,7 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
 }) => {
   const { user } = useAuth();
   const { sendLikeAction } = useRealtime();
-  const { likes, comments, isLiked: realtimeIsLiked, isConnected } = useRealtimePost({
+  const { likes, comments, isLiked: realtimeIsLiked, isConnected, updateLikesLocally } = useRealtimePost({
     postId: item.id,
     initialLikes: item.likes || 0,
     initialComments: item.comments_count || 0,
@@ -127,6 +128,10 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
   const [localMuted, setLocalMuted] = useState(true);
   const [videoError, setVideoError] = useState(false);
   const insets = useSafeAreaInsets();
+  
+  // Like animation
+  const likeScale = useRef(new Animated.Value(1)).current;
+  const likeOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (videoRef) {
@@ -154,9 +159,44 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
     if (isLiking) return;
     setIsLiking(true);
     
+    // Optimistic update - immediately update the UI
+    const newIsLiked = !realtimeIsLiked;
+    const newLikeCount = newIsLiked ? likes + 1 : Math.max(0, likes - 1);
+    updateLikesLocally(newLikeCount, newIsLiked);
+    
+    // Animate like button
+    Animated.sequence([
+      Animated.timing(likeScale, {
+        toValue: 1.3,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+      Animated.timing(likeScale, {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Show like animation if liking
+    if (newIsLiked) {
+      Animated.sequence([
+        Animated.timing(likeOpacity, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(likeOpacity, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+    
     // Send real-time like action
     if (isConnected) {
-      sendLikeAction(item.id, !realtimeIsLiked);
+      sendLikeAction(item.id, newIsLiked);
     }
     
     await onLike(item.id);
@@ -182,7 +222,17 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
     <View style={styles.postContainer}>
       {/* User Info Header */}
       <View style={styles.postHeader}>
-        <View style={styles.postUserInfo}>
+        <TouchableOpacity 
+          style={styles.postUserInfo}
+          onPress={() => {
+            if (item.user?.id) {
+              router.push({
+                pathname: '/user/[id]',
+                params: { id: item.user.id }
+              });
+            }
+          }}
+        >
           <Image 
             source={{ uri: item.user?.profile_picture || 'https://via.placeholder.com/32' }} 
             style={styles.postUserAvatar} 
@@ -194,7 +244,7 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
               <RealtimeIndicator />
             </View>
           </View>
-        </View>
+        </TouchableOpacity>
         <View style={styles.postHeaderActions}>
           {user && user.id !== item.user?.id && (
             <TouchableOpacity style={styles.followButtonSmall}>
@@ -238,30 +288,46 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
         <View style={[styles.rightActions, { bottom: 200 + insets.bottom }]}>
           {/* Like Button */}
           <TouchableOpacity style={styles.actionButton} onPress={handleLike} disabled={isLiking}>
-            <Text style={[styles.actionIcon, realtimeIsLiked && styles.likedIcon]}>{realtimeIsLiked ? '❤️' : '🤍'}</Text>
+            <Animated.View style={{ transform: [{ scale: likeScale }] }}>
+              <Feather 
+                name="heart" 
+                size={32} 
+                color={realtimeIsLiked ? "#ff2d55" : "#fff"} 
+                style={{ marginBottom: 5 }}
+                fill={realtimeIsLiked ? "#ff2d55" : "none"}
+              />
+            </Animated.View>
             <Text style={styles.actionCount}>{formatNumber(likes)}</Text>
           </TouchableOpacity>
+          
+          {/* Like Animation Overlay */}
+          <Animated.View 
+            style={[
+              styles.likeAnimationOverlay,
+              { opacity: likeOpacity }
+            ]}
+          >
+            <Feather name="heart" size={48} color="#ff2d55" fill="#ff2d55" />
+          </Animated.View>
           {/* Share Button */}
           <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-            <Feather name="share-2" size={24} color="#fff" style={{ marginBottom: 5 }} />
-            <Text style={styles.actionCount}>Share</Text>
+            <Feather name="share-2" size={32} color="#fff" style={{ marginBottom: 5 }} />
           </TouchableOpacity>
           {/* Download Button */}
           <TouchableOpacity style={styles.actionButton}>
-            <Feather name="download" size={24} color="#fff" style={{ marginBottom: 5 }} />
-            <Text style={styles.actionCount}>Download</Text>
+            <Feather name="download" size={32} color="#fff" style={{ marginBottom: 5 }} />
           </TouchableOpacity>
           {/* Comment Button */}
           <TouchableOpacity style={styles.actionButton} onPress={() => onComment(item.id)}>
             <View style={styles.actionIconContainer}>
-              <Feather name="message-circle" size={24} color="#fff" style={{ marginBottom: 5 }} />
+              <Feather name="message-circle" size={32} color="#fff" style={{ marginBottom: 5 }} />
               {comments > 0 && (
                 <View style={styles.commentCountBadge}>
                   <Text style={styles.commentCountText}>{formatNumber(comments)}</Text>
                 </View>
               )}
             </View>
-            <Text style={styles.actionCount}>Comment</Text>
+            <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
           </TouchableOpacity>
         </View>
         {/* Bottom Info Overlay */}
@@ -315,6 +381,36 @@ export default function FeedScreen() {
           setPosts(prev => [...prev, ...newPosts]);
         }
         setHasMore(newPosts.length === 10);
+
+        // Load like statuses for new posts
+        if (user) {
+          const likeStatuses = await Promise.all(
+            newPosts.map(async (post) => {
+              try {
+                const likeResponse = await postsApi.checkLikeStatus(post.id);
+                return {
+                  postId: post.id,
+                  liked: likeResponse.status === 'success' ? likeResponse.data.liked : false
+                };
+              } catch (error) {
+                return { postId: post.id, liked: false };
+              }
+            })
+          );
+
+          // Update liked posts set
+          setLikedPosts(prev => {
+            const newSet = new Set(prev);
+            likeStatuses.forEach(({ postId, liked }) => {
+              if (liked) {
+                newSet.add(postId);
+              } else {
+                newSet.delete(postId);
+              }
+            });
+            return newSet;
+          });
+        }
       }
     } catch (error) {
       console.error('Error loading posts:', error);
@@ -343,24 +439,89 @@ export default function FeedScreen() {
   };
 
   const handleLike = async (postId: string) => {
+    const isCurrentlyLiked = likedPosts.has(postId);
+    
+    // Optimistic update for liked posts set
     setLikedPosts(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(postId)) {
+      if (isCurrentlyLiked) {
         newSet.delete(postId);
       } else {
         newSet.add(postId);
       }
       return newSet;
     });
-    // Optionally: call API to like/unlike
+
+    // Optimistic update for posts array
+    setPosts(prev => prev.map(post => {
+      if (post.id === postId) {
+        const currentLikes = post.likes || 0;
+        const newLikes = isCurrentlyLiked ? Math.max(0, currentLikes - 1) : currentLikes + 1;
+        return { ...post, likes: newLikes };
+      }
+      return post;
+    }));
+
     try {
-      const isCurrentlyLiked = likedPosts.has(postId);
+      // Call the appropriate API based on current state
       const response = isCurrentlyLiked 
         ? await postsApi.unlike(postId)
         : await postsApi.like(postId);
-      // Optionally: update post like count
+      
+      if (response.status === 'success') {
+        // Update posts with new like count if provided by server
+        if (response.data?.likeCount !== undefined) {
+          setPosts(prev => prev.map(post => 
+            post.id === postId 
+              ? { ...post, likes: response.data.likeCount }
+              : post
+          ));
+        }
+      } else {
+        // Revert optimistic updates on error
+        setLikedPosts(prev => {
+          const newSet = new Set(prev);
+          if (isCurrentlyLiked) {
+            newSet.add(postId);
+          } else {
+            newSet.delete(postId);
+          }
+          return newSet;
+        });
+        
+        setPosts(prev => prev.map(post => {
+          if (post.id === postId) {
+            const currentLikes = post.likes || 0;
+            const originalLikes = isCurrentlyLiked ? currentLikes + 1 : Math.max(0, currentLikes - 1);
+            return { ...post, likes: originalLikes };
+          }
+          return post;
+        }));
+        
+        console.error('Like action failed:', response.message);
+      }
     } catch (error) {
-      // Optionally: revert like state on error
+      // Revert optimistic updates on error
+      setLikedPosts(prev => {
+        const newSet = new Set(prev);
+        if (isCurrentlyLiked) {
+          newSet.add(postId);
+        } else {
+          newSet.delete(postId);
+        }
+        return newSet;
+      });
+      
+      setPosts(prev => prev.map(post => {
+        if (post.id === postId) {
+          const currentLikes = post.likes || 0;
+          const originalLikes = isCurrentlyLiked ? currentLikes + 1 : Math.max(0, currentLikes - 1);
+          return { ...post, likes: originalLikes };
+        }
+        return post;
+      }));
+      
+      console.error('Like action failed:', error);
     }
   };
 
@@ -459,7 +620,7 @@ export default function FeedScreen() {
           }
         />
         {/* Dark nav bar background */}
-        <View style={styles.navBarBackground} />
+        {/* <View style={styles.navBarBackground} /> */}
         {/* Comments Overlay */}
         <CommentsOverlay
           postId={activeCommentsPostId || ''}
@@ -513,14 +674,15 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     alignItems: 'center',
-    marginBottom: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    borderRadius: 32,
-    width: 64,
-    height: 64,
+    marginBottom: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 40,
+    width: 80,
+    height: 80,
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    padding: 10,
   },
   actionIcon: {
     fontSize: 22,
@@ -754,5 +916,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 9,
     fontWeight: 'bold',
+  },
+  likeAnimationOverlay: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -24 }, { translateY: -24 }],
+    zIndex: 100,
   },
 });

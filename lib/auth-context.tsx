@@ -8,6 +8,8 @@ interface AuthContextType extends AuthState {
   register: (data: any) => Promise<boolean>;
   logout: () => void;
   refreshToken: () => Promise<void>;
+  error: string | null;
+  clearError: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -17,9 +19,10 @@ type AuthAction =
   | { type: 'SET_USER'; payload: User }
   | { type: 'SET_TOKEN'; payload: string }
   | { type: 'LOGOUT' }
-  | { type: 'SET_AUTHENTICATED'; payload: boolean };
+  | { type: 'SET_AUTHENTICATED'; payload: boolean }
+  | { type: 'SET_ERROR'; payload: string | null };
 
-const authReducer = (state: AuthState, action: AuthAction): AuthState => {
+const authReducer = (state: AuthState & { error: string | null }, action: AuthAction): AuthState & { error: string | null } => {
   switch (action.type) {
     case 'SET_LOADING':
       return { ...state, loading: action.payload };
@@ -28,19 +31,22 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
     case 'SET_TOKEN':
       return { ...state, token: action.payload };
     case 'LOGOUT':
-      return { ...state, user: null, token: null, isAuthenticated: false };
+      return { ...state, user: null, token: null, isAuthenticated: false, error: null };
     case 'SET_AUTHENTICATED':
       return { ...state, isAuthenticated: action.payload };
+    case 'SET_ERROR':
+      return { ...state, error: action.payload };
     default:
       return state;
   }
 };
 
-const initialState: AuthState = {
+const initialState: AuthState & { error: string | null } = {
   isAuthenticated: false,
   user: null,
   token: null,
   loading: true,
+  error: null,
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -71,11 +77,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string): Promise<boolean> => {
     dispatch({ type: 'SET_LOADING', payload: true });
+    dispatch({ type: 'SET_ERROR', payload: null });
     try {
       const response = await authApi.login(email, password);
       
-      if (response.status === 'success') {
-        const { accessToken, user } = response.data;
+      console.log('Login response:', JSON.stringify(response, null, 2));
+      
+      if (response.status === 'success' && response.data) {
+        const accessToken = response.data.accessToken;
+        const user = response.data.user || response.data;
+        
+        if (!accessToken) {
+          console.error('No access token in response:', response.data);
+          dispatch({ type: 'SET_ERROR', payload: 'Invalid response from server' });
+          return false;
+        }
         
         await Promise.all([
           AsyncStorage.setItem('talynk_token', accessToken),
@@ -87,10 +103,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return true;
       } else {
         console.error('Login failed:', response.message);
+        dispatch({ type: 'SET_ERROR', payload: response.message });
         return false;
       }
     } catch (error) {
       console.error('Login error:', error);
+      dispatch({ type: 'SET_ERROR', payload: 'Login failed. Please try again.' });
       return false;
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
@@ -99,26 +117,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = async (data: any): Promise<boolean> => {
     dispatch({ type: 'SET_LOADING', payload: true });
+    dispatch({ type: 'SET_ERROR', payload: null });
     try {
       const response = await authApi.register(data);
-      
+      console.log('Registration response:', JSON.stringify(response, null, 2));
       if (response.status === 'success') {
-        const { accessToken, user } = response.data;
-        
-        await Promise.all([
-          AsyncStorage.setItem('talynk_token', accessToken),
-          AsyncStorage.setItem('talynk_user', JSON.stringify(user)),
-        ]);
-
-        dispatch({ type: 'SET_TOKEN', payload: accessToken });
-        dispatch({ type: 'SET_USER', payload: user });
+        // Registration succeeded, do NOT expect accessToken
         return true;
       } else {
         console.error('Registration failed:', response.message);
+        dispatch({ type: 'SET_ERROR', payload: response.message });
         return false;
       }
     } catch (error) {
       console.error('Registration error:', error);
+      dispatch({ type: 'SET_ERROR', payload: 'Registration failed. Please try again.' });
       return false;
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
@@ -153,12 +166,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const clearError = () => {
+    dispatch({ type: 'SET_ERROR', payload: null });
+  };
+
   const value: AuthContextType = {
     ...state,
     login,
     register,
     logout,
     refreshToken,
+    clearError,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

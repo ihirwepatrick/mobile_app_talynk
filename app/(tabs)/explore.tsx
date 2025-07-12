@@ -191,7 +191,10 @@ export default function ExploreScreen() {
   };
 
   const navigateToUserProfile = (userId: string) => {
-    router.push(`/user/${userId}` as any);
+    router.push({
+      pathname: '/user/[id]',
+      params: { id: userId }
+    });
   };
 
   const navigateToPost = (postId: string) => {

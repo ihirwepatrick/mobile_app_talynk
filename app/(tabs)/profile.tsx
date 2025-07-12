@@ -20,10 +20,11 @@ import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { userApi, followsApi, postsApi } from '@/lib/api';
 import { User, Post } from '@/types';
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { Video, ResizeMode } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { useRealtime } from '@/lib/realtime-context';
+import { EditProfileModal } from '@/components/EditProfileModal';
 
 const COLORS = {
   light: {
@@ -76,6 +77,7 @@ export default function ProfileScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editProfileModalVisible, setEditProfileModalVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [postModalVisible, setPostModalVisible] = useState(false);
   const [postActionsVisible, setPostActionsVisible] = useState(false);
@@ -271,6 +273,15 @@ export default function ProfileScreen() {
     setPostActionsVisible(false);
     setSelectedPost(null);
   };
+
+  const handleEditProfile = () => {
+    setEditProfileModalVisible(true);
+  };
+
+  const handleProfileUpdated = (updatedUser: any) => {
+    setProfile(updatedUser);
+    setEditProfileModalVisible(false);
+  };
   const handleDeletePost = async () => {
     if (!selectedPost) return;
     Alert.alert('Delete Post', 'Are you sure you want to delete this post?', [
@@ -347,7 +358,7 @@ export default function ProfileScreen() {
         <View style={{ alignItems: 'center', paddingTop: 24, paddingBottom: 16 }}>
           <View style={styles.avatarShadowWrapper}>
             <Image
-              source={profile?.profileImage ? { uri: profile.profileImage } : require('../../assets/images/icon.png')}
+              source={profile?.profile_picture ? { uri: profile.profile_picture } : require('../../assets/images/icon.png')}
               style={styles.avatarLarge}
               resizeMode="cover"
             />
@@ -375,14 +386,25 @@ export default function ProfileScreen() {
         </TouchableOpacity>
         {/* Dropdown menu */}
         {menuVisible && (
-          <View style={[styles.menuDropdown, { backgroundColor: colorScheme === 'dark' ? '#232326' : '#fff', shadowColor: colorScheme === 'dark' ? '#000' : '#000', }] }>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); router.push('/settings'); }}>
-              <Text style={[styles.menuItemText, { color: colorScheme === 'dark' ? '#fff' : '#222' }]}>Settings</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); logout(); }}>
-              <Text style={[styles.menuItemText, { color: C.logoutButton } ]}>Logout</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity 
+            style={styles.menuOverlay} 
+            activeOpacity={1} 
+            onPress={() => setMenuVisible(false)}
+          >
+            <View style={[styles.menuDropdown, { backgroundColor: colorScheme === 'dark' ? '#232326' : '#fff', shadowColor: colorScheme === 'dark' ? '#000' : '#000', }] }>
+              {currentUser && currentUser.id === userId && (
+                <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); handleEditProfile(); }}>
+                  <Text style={[styles.menuItemText, { color: colorScheme === 'dark' ? '#fff' : '#222' }]}>Edit Profile</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); router.push('/settings'); }}>
+                <Text style={[styles.menuItemText, { color: colorScheme === 'dark' ? '#fff' : '#222' }]}>Settings</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); logout(); }}>
+                <Text style={[styles.menuItemText, { color: C.logoutButton } ]}>Logout</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
         )}
       </View>
       {/* Tabs */}
@@ -418,7 +440,7 @@ export default function ProfileScreen() {
                   <View style={styles.postHeader}>
                     <View style={styles.postUserInfo}>
                       <Image
-                        source={{ uri: profile?.profileImage || 'https://via.placeholder.com/24' }}
+                        source={{ uri: profile?.profile_picture || 'https://via.placeholder.com/24' }}
                         style={styles.postUserAvatar}
                       />
                       <Text style={styles.postUsername}>@{profile?.username}</Text>
@@ -468,6 +490,21 @@ export default function ProfileScreen() {
                     <Text style={styles.postCaption} numberOfLines={2}>
                       {item.caption || ''}
                     </Text>
+                    <View style={styles.postFooterActions}>
+                      <View style={styles.postAction}>
+                        <Feather 
+                          name="heart" 
+                          size={16} 
+                          color={(item.likes || 0) > 0 ? "#ff2d55" : "#666"} 
+                          fill={(item.likes || 0) > 0 ? "#ff2d55" : "none"}
+                        />
+                        <Text style={styles.postActionText}>{item.likes || 0}</Text>
+                      </View>
+                      <View style={styles.postAction}>
+                        <Feather name="message-circle" size={16} color="#666" />
+                        <Text style={styles.postActionText}>{item.comments_count || 0}</Text>
+                      </View>
+                    </View>
                     {item.category && (
                       <View style={[styles.categoryTag, { backgroundColor: C.primary }]}>
                         <Text style={[styles.categoryText, { color: C.buttonText }]}>
@@ -494,15 +531,13 @@ export default function ProfileScreen() {
           />
         )}
       </View>
-      {/* Edit Profile Modal (skeleton) */}
-      <Modal visible={editModalVisible} animationType="slide" onRequestClose={() => setEditModalVisible(false)}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
-          <Text>Edit Profile (Coming Soon)</Text>
-          <TouchableOpacity onPress={() => setEditModalVisible(false)} style={{ marginTop: 20 }}>
-            <Text style={{ color: C.primary }}>Close</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+      {/* Edit Profile Modal */}
+      <EditProfileModal
+        isVisible={editProfileModalVisible}
+        onClose={() => setEditProfileModalVisible(false)}
+        user={profile}
+        onProfileUpdated={handleProfileUpdated}
+      />
       {/* Post Modal Overlay */}
       <Modal visible={postModalVisible} animationType="slide" transparent onRequestClose={handleClosePostModal}>
         <View style={styles.overlayBackdrop}>
@@ -806,6 +841,22 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '600',
   },
+  postFooterActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  postAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  postActionText: {
+    fontSize: 10,
+    color: '#666',
+    marginLeft: 2,
+  },
   emptyContainer: {
     alignItems: 'center',
     padding: 40,
@@ -898,6 +949,14 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     fontSize: 12,
     overflow: 'hidden',
+  },
+  menuOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 99,
   },
   menuDropdown: {
     position: 'absolute',

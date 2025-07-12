@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRealtime } from '../realtime-context';
 import websocketService, { PostUpdate, CommentUpdate } from '../websocket-service';
 
@@ -20,6 +20,12 @@ export const useRealtimePost = ({
   const [comments, setComments] = useState(initialComments);
   const [isLiked, setIsLiked] = useState(initialIsLiked);
   const [newComments, setNewComments] = useState<CommentUpdate['comment'][]>([]);
+
+  // Function to update likes locally for optimistic updates
+  const updateLikesLocally = useCallback((newLikeCount: number, newIsLiked: boolean) => {
+    setLikes(newLikeCount);
+    setIsLiked(newIsLiked);
+  }, []);
 
   useEffect(() => {
     if (isConnected && postId) {
@@ -70,5 +76,6 @@ export const useRealtimePost = ({
     isLiked,
     newComments,
     isConnected,
+    updateLikesLocally,
   };
 }; 

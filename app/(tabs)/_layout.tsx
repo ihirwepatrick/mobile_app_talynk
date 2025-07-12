@@ -3,6 +3,8 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Link, Tabs } from 'expo-router';
 import { Pressable, View, Text, TouchableOpacity, useColorScheme } from 'react-native';
 import { useAuth } from '@/lib/auth-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MaterialIcons, Feather } from '@expo/vector-icons';
 
 import Colors from '@/constants/Colors';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
@@ -32,72 +34,157 @@ const COLORS = {
   },
 };
 
+function CustomTabBar({ state, descriptors, navigation }: { state: any; descriptors: any; navigation: any }) {
+  const colorScheme = useColorScheme();
+  const insets = useSafeAreaInsets();
+  const isDark = colorScheme === 'dark';
+  const bg = isDark ? '#18181b' : '#fff';
+  const active = isDark ? '#fff' : '#18181b';
+  const inactive = isDark ? '#a1a1aa' : '#666';
+  const blue = '#007AFF';
+
+  const icons = [
+    <Feather name="home" size={26} />, // Feed
+    <Feather name="users" size={26} />, // Explore
+    <Feather name="plus" size={32} color={blue} />, // Upload
+    <Feather name="search" size={26} />, // Search
+    <Feather name="user" size={26} />, // Profile
+  ];
+  const labels = ['Home', 'Explore', 'Upload video', 'Search', 'My account'];
+
+  return (
+    <View style={{
+      flexDirection: 'row',
+      backgroundColor: bg,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      height: 76 + insets.bottom, // slightly less height
+      paddingBottom: insets.bottom + 2, // less padding
+      alignItems: 'flex-end',
+      justifyContent: 'space-between',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -2 },
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+      elevation: 8,
+    }}>
+      {state.routes.map((route: any, idx: number) => {
+        const isFocused = state.index === idx;
+        const onPress = () => {
+          if (!isFocused) navigation.navigate(route.name);
+        };
+        // Center button
+        if (idx === 2) {
+          return (
+            <View key={route.key} style={{ flex: 1, alignItems: 'center', top: -36 }}>
+              <TouchableOpacity
+                onPress={onPress}
+                activeOpacity={0.8}
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 32,
+                  backgroundColor: '#fff',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.18,
+                  shadowRadius: 8,
+                  elevation: 8,
+                  borderWidth: 4,
+                  borderColor: bg,
+                }}
+              >
+                <Feather name="plus" size={32} color={blue} />
+              </TouchableOpacity>
+              <Text style={{ color: isDark ? '#fff' : '#222', fontSize: 13, marginTop: 2, fontWeight: '500' }}>{labels[idx]}</Text>
+            </View>
+          );
+        }
+        // Other tabs
+        return (
+          <TouchableOpacity
+            key={route.key}
+            onPress={onPress}
+            activeOpacity={0.8}
+            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: 60 }}
+          >
+            <View style={{
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: isFocused ? (isDark ? '#232326' : '#f0f0f0') : 'transparent',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 2,
+            }}>
+              {React.cloneElement(icons[idx], { color: isFocused ? '#fff' : inactive })}
+            </View>
+            <Text style={{ color: isFocused ? '#fff' : inactive, fontSize: 13, fontWeight: isFocused ? 'bold' : '500' }}>{labels[idx]}</Text>
+            {isFocused && idx !== 2 && (
+              <View style={{ height: 4, width: 32, backgroundColor: blue, borderRadius: 2, marginTop: 2 }} />
+            )}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const C = COLORS[colorScheme ?? 'light'];
   const { logout } = useAuth();
 
   return (
-    <RealtimeProvider>
-      <AuthGuard>
-        <Tabs
-        screenOptions={{
-          tabBarActiveTintColor: C.tabBarActive,
-          tabBarInactiveTintColor: C.tabBarInactive,
-          tabBarStyle: {
-            backgroundColor: 'rgba(0,0,0,0.9)',
-            borderTopColor: 'transparent',
-            position: 'absolute',
-            elevation: 8,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: -2 },
-            shadowOpacity: 0.3,
-            shadowRadius: 8,
-            borderTopLeftRadius: 20,
-            borderTopRightRadius: 20,
-            height: 60,
-            paddingBottom: 8,
-            paddingTop: 8,
-          },
-          headerShown: useClientOnlyValue(false, true),
-        }}>
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: 'Feed',
-            tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="explore"
-          options={{
-            title: 'Explore',
-            tabBarIcon: ({ color }) => <TabBarIcon name="search" color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="create"
-          options={{
-            title: 'Create',
-            tabBarIcon: ({ color }) => <TabBarIcon name="plus" color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="notifications"
-          options={{
-            title: 'Notifications',
-            tabBarIcon: ({ color }) => <TabBarIcon name="bell" color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="profile"
-          options={{
-            title: 'Profile',
-            tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />,
-          }}
-        />
-      </Tabs>
-    </AuthGuard>
+    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
+      <RealtimeProvider>
+        <AuthGuard>
+          <Tabs
+            tabBar={props => <CustomTabBar {...props} />}
+            screenOptions={{
+              headerShown: useClientOnlyValue(false, true),
+            }}
+          >
+          <Tabs.Screen
+            name="index"
+            options={{
+              title: 'Feed',
+              tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="explore"
+            options={{
+              title: 'Explore',
+              tabBarIcon: ({ color }) => <TabBarIcon name="search" color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="create"
+            options={{
+              title: 'Create',
+              tabBarIcon: ({ color }) => <TabBarIcon name="plus" color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="notifications"
+            options={{
+              title: 'Notifications',
+              tabBarIcon: ({ color }) => <TabBarIcon name="bell" color={color} />,
+            }}
+          />
+          <Tabs.Screen
+            name="profile"
+            options={{
+              title: 'Profile',
+              tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />,
+            }}
+          />
+        </Tabs>
+      </AuthGuard>
     </RealtimeProvider>
+    </View>
   );
 }

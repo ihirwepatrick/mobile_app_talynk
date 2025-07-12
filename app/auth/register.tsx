@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Pressable,
   useColorScheme,
+  Linking,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
@@ -56,39 +57,118 @@ const COLORS = {
 };
 
 export default function RegisterScreen() {
+  const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
+  const [phone1, setPhone1] = useState('');
+  const [phone2, setPhone2] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [agreed, setAgreed] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
-  const { register, loading } = useAuth();
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
+  const { register, loading, error, clearError } = useAuth();
   const colorScheme = useColorScheme() || 'light';
   const C = COLORS[colorScheme];
 
   const handleRegister = async () => {
-    setError(null);
+    clearError();
     setSuccess(null);
     setWarning(null);
-    if (!username || !email || !password || !confirmPassword) {
-      setError('Please fill in all fields');
+    
+    // Validate required fields
+    if (!name.trim()) {
+      // For validation errors, we'll show them in the UI but not store in auth context
+      setWarning('Please enter your full name');
       return;
     }
+    if (!username.trim()) {
+      setWarning('Please enter a username');
+      return;
+    }
+    if (!phone1.trim()) {
+      setWarning('Please enter your primary phone number');
+      return;
+    }
+    if (!password) {
+      setWarning('Please enter a password');
+      return;
+    }
+    if (!confirmPassword) {
+      setWarning('Please confirm your password');
+      return;
+    }
+    if (!agreed) {
+      setWarning('You must agree to the Terms and Conditions');
+      return;
+    }
+    
+    // Validate username format (letters, numbers, underscores only)
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      setWarning('Username can only contain letters, numbers, and underscores');
+      return;
+    }
+    
+    // Validate email format if provided
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setWarning('Please enter a valid email address');
+      return;
+    }
+    
+    // Validate phone format (basic international format)
+    const phoneRegex = /^\+?[\d\s\-\(\)]{8,20}$/;
+    if (!phoneRegex.test(phone1)) {
+      setWarning('Please enter a valid primary phone number');
+      return;
+    }
+    
+    // Validate secondary phone if provided
+    if (phone2.trim() && !phoneRegex.test(phone2)) {
+      setWarning('Please enter a valid secondary phone number');
+      return;
+    }
+    
+    // Validate password strength
+    if (password.length < 8) {
+      setWarning('Password must be at least 8 characters long');
+      return;
+    }
+    
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setWarning('Passwords do not match');
       return;
     }
-    // Add any additional validation as needed
-    const success = await register(username, email, password);
-    if (success) {
-      setSuccess('Registration successful!');
-      router.replace('/(tabs)');
-    } else {
-      setError('Registration failed. Please try again.');
-    }
+    
+    // Prepare registration data
+    const registrationData = {
+      name: name.trim(),
+      username: username.trim(),
+      email: email.trim() || `${username.trim()}@talynk.com`, // Use generated email if not provided
+      password: password,
+      phone1: phone1.trim(),
+      phone2: phone2.trim() || undefined, // Only send if provided
+    };
+    
+          // Attempt registration
+      try {
+        const success = await register(registrationData);
+        if (success) {
+          setShowSuccessOverlay(true);
+        } else {
+          // The error message will be handled by the auth context
+          // We don't need to set a generic error here
+        }
+      } catch (err: any) {
+        setWarning(err.message || 'Registration failed. Please try again.');
+      }
+  };
+
+  const openTerms = () => {
+    // You can replace this with your actual terms URL
+    Linking.openURL('https://talynk.com/terms');
   };
 
   return (
@@ -123,10 +203,22 @@ export default function RegisterScreen() {
         )}
 
         <View style={[styles.form, { backgroundColor: C.card, borderColor: C.border }]}> 
+          <Text style={[styles.label, { color: C.text }]}>Full Name</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
+            placeholder="John Doe"
+            value={name}
+            onChangeText={setName}
+            autoCapitalize="words"
+            autoCorrect={false}
+            placeholderTextColor={C.placeholder}
+            editable={!loading}
+          />
+
           <Text style={[styles.label, { color: C.text }]}>Username</Text>
           <TextInput
             style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-            placeholder="Enter your username"
+            placeholder="johndoe"
             value={username}
             onChangeText={setUsername}
             autoCapitalize="none"
@@ -135,11 +227,14 @@ export default function RegisterScreen() {
             placeholderTextColor={C.placeholder}
             editable={!loading}
           />
+          <Text style={[styles.helperText, { color: C.textSecondary }]}>
+            Username can only contain letters, numbers, and underscores
+          </Text>
 
-          <Text style={[styles.label, { color: C.text }]}>Email</Text>
+          <Text style={[styles.label, { color: C.text }]}>Email (Optional)</Text>
           <TextInput
             style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-            placeholder="Enter your email"
+            placeholder="name@example.com"
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
@@ -148,6 +243,43 @@ export default function RegisterScreen() {
             placeholderTextColor={C.placeholder}
             editable={!loading}
           />
+          <Text style={[styles.helperText, { color: C.textSecondary }]}>
+            If not provided, we'll use your username to create an account
+          </Text>
+
+          <View style={styles.phoneContainer}>
+            <View style={styles.phoneRow}>
+              <Text style={[styles.label, { color: C.text }]}>Primary Phone <Text style={{ color: '#ef4444' }}>*</Text></Text>
+              <Text style={[styles.label, { color: C.text }]}>Secondary Phone (Optional)</Text>
+            </View>
+            <View style={styles.phoneInputs}>
+              <TextInput
+                style={[styles.phoneInput, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
+                placeholder="+250 7XX XXX XXX"
+                value={phone1}
+                onChangeText={setPhone1}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="phone-pad"
+                placeholderTextColor={C.placeholder}
+                editable={!loading}
+              />
+              <TextInput
+                style={[styles.phoneInput, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
+                placeholder="+250 7XX XXX XXX"
+                value={phone2}
+                onChangeText={setPhone2}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="phone-pad"
+                placeholderTextColor={C.placeholder}
+                editable={!loading}
+              />
+            </View>
+            <Text style={[styles.helperText, { color: C.textSecondary }]}>
+              Enter valid phone numbers (e.g., +250 791234567)
+            </Text>
+          </View>
 
           <Text style={[styles.label, { color: C.text }]}>Password</Text>
           <View style={[styles.passwordInputContainer, { backgroundColor: C.input, borderColor: C.inputBorder }]}> 
@@ -174,6 +306,9 @@ export default function RegisterScreen() {
               />
             </Pressable>
           </View>
+          <Text style={[styles.helperText, { color: C.textSecondary }]}>
+            Password must be at least 8 characters long
+          </Text>
 
           <Text style={[styles.label, { color: C.text }]}>Confirm Password</Text>
           <View style={[styles.passwordInputContainer, { backgroundColor: C.input, borderColor: C.inputBorder }]}> 
@@ -201,6 +336,28 @@ export default function RegisterScreen() {
             </Pressable>
           </View>
 
+          <View style={styles.termsContainer}>
+            <Pressable
+              onPress={() => setAgreed((v) => !v)}
+              style={[
+                styles.checkbox,
+                {
+                  borderColor: agreed ? C.primary : C.inputBorder,
+                  backgroundColor: agreed ? C.primary : 'transparent',
+                }
+              ]}
+              hitSlop={10}
+            >
+              {agreed && <Ionicons name="checkmark" size={16} color="#fff" />}
+            </Pressable>
+            <Text style={[styles.termsText, { color: C.text }]}>
+              I agree to the{' '}
+              <Text style={[styles.termsLink, { color: C.primary }]} onPress={openTerms}>
+                Terms and Conditions
+              </Text>
+            </Text>
+          </View>
+
           <TouchableOpacity
             style={[styles.button, { backgroundColor: loading ? C.buttonDisabled : C.primary }]}
             onPress={handleRegister}
@@ -224,6 +381,29 @@ export default function RegisterScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Success Overlay */}
+      {showSuccessOverlay && (
+        <View style={[styles.overlayContainer, colorScheme === 'dark' && { backgroundColor: 'rgba(24,24,27,0.96)' }]}> 
+          <View style={[styles.successOverlay, colorScheme === 'dark' && { backgroundColor: '#232326' }]}> 
+            <View style={styles.successIconContainer}>
+              <Ionicons name="checkmark-circle" size={80} color="#22c55e" />
+            </View>
+            <Text style={[styles.successTitle, colorScheme === 'dark' && { color: '#22c55e' }]}>Registration Successful!</Text>
+            <Text style={[styles.successMessage, colorScheme === 'dark' && { color: '#ccc' }]}>Your account has been created successfully. You can now sign in to start using Talynk.</Text>
+            <TouchableOpacity
+              style={styles.goToLoginButton}
+              onPress={() => {
+                setShowSuccessOverlay(false);
+                router.push('/auth/login');
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.goToLoginButtonText}>Go to Login</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -282,6 +462,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 12,
   },
+  helperText: {
+    fontSize: 12,
+    marginTop: -8,
+    marginBottom: 12,
+  },
+  phoneContainer: {
+    marginBottom: 12,
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  phoneInputs: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  phoneInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 15,
+    fontSize: 16,
+  },
   passwordInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -291,6 +495,27 @@ const styles = StyleSheet.create({
   },
   eyeButton: {
     padding: 10,
+  },
+  termsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  termsText: {
+    fontSize: 14,
+    flex: 1,
+  },
+  termsLink: {
+    textDecorationLine: 'underline',
   },
   button: {
     borderRadius: 8,
@@ -309,5 +534,61 @@ const styles = StyleSheet.create({
   },
   linkText: {
     fontSize: 15,
+  },
+  overlayContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  successOverlay: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 32,
+    margin: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  successIconContainer: {
+    marginBottom: 20,
+  },
+  successTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#22c55e',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  successMessage: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  goToLoginButton: {
+    backgroundColor: '#22c55e',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  goToLoginButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
   },
 }); 
