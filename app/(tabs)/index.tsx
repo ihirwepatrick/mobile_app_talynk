@@ -21,6 +21,10 @@ import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import CommentsOverlay from '@/components/CommentsOverlay';
+import { useRealtime } from '@/lib/realtime-context';
+import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
+import RealtimeIndicator from '@/components/RealtimeIndicator';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -108,6 +112,14 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
   isLiked, 
   isActive
 }) => {
+  const { user } = useAuth();
+  const { sendLikeAction } = useRealtime();
+  const { likes, comments, isLiked: realtimeIsLiked, isConnected } = useRealtimePost({
+    postId: item.id,
+    initialLikes: item.likes || 0,
+    initialComments: item.comments_count || 0,
+    initialIsLiked: isLiked,
+  });
   const [videoRef, setVideoRef] = useState<Video | null>(null);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -141,6 +153,12 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
   const handleLike = async () => {
     if (isLiking) return;
     setIsLiking(true);
+    
+    // Send real-time like action
+    if (isConnected) {
+      sendLikeAction(item.id, !realtimeIsLiked);
+    }
+    
     await onLike(item.id);
     setIsLiking(false);
   };
@@ -162,6 +180,33 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
 
   return (
     <View style={styles.postContainer}>
+      {/* User Info Header */}
+      <View style={styles.postHeader}>
+        <View style={styles.postUserInfo}>
+          <Image 
+            source={{ uri: item.user?.profile_picture || 'https://via.placeholder.com/32' }} 
+            style={styles.postUserAvatar} 
+          />
+          <View style={styles.postUserText}>
+            <Text style={styles.postUsername}>@{item.user?.username || 'unknown'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={styles.postTime}>{timeAgo(item.createdAt || '')}</Text>
+              <RealtimeIndicator />
+            </View>
+          </View>
+        </View>
+        <View style={styles.postHeaderActions}>
+          {user && user.id !== item.user?.id && (
+            <TouchableOpacity style={styles.followButtonSmall}>
+              <Text style={styles.followButtonTextSmall}>Follow</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.postMenuButton}>
+            <Feather name="more-horizontal" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <View style={styles.mediaContainer}>
         {isVideo ? (
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={handleVideoTap}>
@@ -177,7 +222,7 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
               useNativeControls={false}
             />
             {/* Mute/Unmute Icon Top Right */}
-            <TouchableOpacity style={[styles.muteIconTopRight, { top: insets.top + 16 }]} onPress={handleMuteIconPress}>
+            <TouchableOpacity style={[styles.muteIconTopRight, { top: insets.top + 60 }]} onPress={handleMuteIconPress}>
               <Feather name={localMuted ? 'volume-x' : 'volume-2'} size={28} color="#fff" />
             </TouchableOpacity>
           </TouchableOpacity>
@@ -190,36 +235,48 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
           />
         )}
         {/* Right Side Actions */}
-        <View style={[styles.rightActions, { bottom: 120 + insets.bottom }]}>
+        <View style={[styles.rightActions, { bottom: 200 + insets.bottom }]}>
           {/* Like Button */}
           <TouchableOpacity style={styles.actionButton} onPress={handleLike} disabled={isLiking}>
-            <Text style={[styles.actionIcon, isLiked && styles.likedIcon]}>{isLiked ? '❤️' : '🤍'}</Text>
-            <Text style={styles.actionCount}>{formatNumber(item.likes || 0)}</Text>
+            <Text style={[styles.actionIcon, realtimeIsLiked && styles.likedIcon]}>{realtimeIsLiked ? '❤️' : '🤍'}</Text>
+            <Text style={styles.actionCount}>{formatNumber(likes)}</Text>
           </TouchableOpacity>
           {/* Share Button */}
           <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-            <Feather name="share-2" size={30} color="#fff" style={{ marginBottom: 5 }} />
+            <Feather name="share-2" size={24} color="#fff" style={{ marginBottom: 5 }} />
             <Text style={styles.actionCount}>Share</Text>
           </TouchableOpacity>
-          {/* Save Button */}
+          {/* Download Button */}
           <TouchableOpacity style={styles.actionButton}>
-            <Text style={styles.actionIcon}>🔖</Text>
-            <Text style={styles.actionCount}>Save</Text>
+            <Feather name="download" size={24} color="#fff" style={{ marginBottom: 5 }} />
+            <Text style={styles.actionCount}>Download</Text>
           </TouchableOpacity>
-          {/* 3-dots Button */}
-          <TouchableOpacity style={styles.actionButton}>
-            <Text style={styles.actionIcon}>⋯</Text>
-            <Text style={styles.actionCount}>More</Text>
+          {/* Comment Button */}
+          <TouchableOpacity style={styles.actionButton} onPress={() => onComment(item.id)}>
+            <View style={styles.actionIconContainer}>
+              <Feather name="message-circle" size={24} color="#fff" style={{ marginBottom: 5 }} />
+              {comments > 0 && (
+                <View style={styles.commentCountBadge}>
+                  <Text style={styles.commentCountText}>{formatNumber(comments)}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.actionCount}>Comment</Text>
           </TouchableOpacity>
         </View>
         {/* Bottom Info Overlay */}
-        <View style={[styles.bottomOverlay, { paddingBottom: 56 + insets.bottom }]}>
+        <View style={[styles.bottomOverlay, { paddingBottom: 120 + insets.bottom }]}>
           <View style={styles.gradient} />
           <View style={styles.bottomInfoRow}>
-            <Image source={{ uri: item.user?.profile_picture || 'https://via.placeholder.com/40' }} style={styles.avatar} />
-            <View style={styles.userInfoText}>
-              <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
-              <Text style={styles.caption} numberOfLines={2}>{item.description || item.title || ''}</Text>
+            <View style={styles.bottomContent}>
+              <Text style={styles.caption} numberOfLines={3}>{item.description || item.title || ''}</Text>
+              {item.category && (
+                <View style={styles.categoryTag}>
+                  <Text style={styles.categoryText}>
+                    {typeof item.category === 'string' ? item.category : item.category.name}
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
         </View>
@@ -240,6 +297,10 @@ export default function FeedScreen() {
   const flatListRef = useRef<FlatList>(null);
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const [commentsVisible, setCommentsVisible] = useState(false);
+  const [activeCommentsPostId, setActiveCommentsPostId] = useState<string | null>(null);
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
 
   const colors = COLORS.dark;
 
@@ -303,8 +364,30 @@ export default function FeedScreen() {
     }
   };
 
-  const handleComment = (postId: string) => {
-    // TODO: Navigate to comments screen
+  const handleComment = async (postId: string) => {
+    setActiveCommentsPostId(postId);
+    setCommentsVisible(true);
+    setCommentsLoading(true);
+    try {
+      const response = await postsApi.getComments(postId);
+      if (response.status === 'success' && response.data?.comments) {
+        setComments(response.data.comments);
+      } else {
+        setComments([]);
+      }
+    } catch {
+      setComments([]);
+    }
+    setCommentsLoading(false);
+  };
+  const handleAddComment = async (text: string) => {
+    if (!activeCommentsPostId) return;
+    try {
+      const response = await postsApi.addComment(activeCommentsPostId, text);
+      if (response.status === 'success' && response.data?.comment?.length) {
+        setComments([response.data.comment[0], ...comments]);
+      }
+    } catch {}
   };
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
@@ -377,6 +460,15 @@ export default function FeedScreen() {
         />
         {/* Dark nav bar background */}
         <View style={styles.navBarBackground} />
+        {/* Comments Overlay */}
+        <CommentsOverlay
+          postId={activeCommentsPostId || ''}
+          isVisible={commentsVisible}
+          onClose={() => setCommentsVisible(false)}
+          comments={comments}
+          onAddComment={handleAddComment}
+          loading={commentsLoading}
+        />
       </MuteContext.Provider>
     </SafeAreaView>
   );
@@ -422,10 +514,17 @@ const styles = StyleSheet.create({
   actionButton: {
     alignItems: 'center',
     marginBottom: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderRadius: 32,
+    width: 64,
+    height: 64,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   actionIcon: {
-    fontSize: 30,
-    marginBottom: 5,
+    fontSize: 22,
+    marginBottom: 4,
     color: '#fff',
   },
   likedIcon: {
@@ -456,7 +555,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: 20,
     zIndex: 21,
   },
   avatar: {
@@ -480,6 +579,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     lineHeight: 20,
+    marginBottom: 4,
   },
   emptyContainer: {
     flex: 1,
@@ -517,5 +617,142 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
     borderRadius: 20,
     padding: 6,
+  },
+  floatingProfileContainer: {
+    position: 'absolute',
+    left: 16,
+    bottom: 100, // adjust as needed
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 10,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 24,
+    padding: 8,
+  },
+  profileTextContainer: {
+    flex: 1,
+    marginRight: 8,
+  },
+  followButton: {
+    backgroundColor: '#60a5fa',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  followingButton: {
+    backgroundColor: '#232326',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#60a5fa',
+  },
+  followText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  followingText: {
+    color: '#60a5fa',
+    fontWeight: 'bold',
+  },
+  postHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 25,
+  },
+  postUserInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  postUserAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 10,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  postUserText: {
+    flex: 1,
+  },
+  postUsername: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  postTime: {
+    color: '#ccc',
+    fontSize: 12,
+  },
+  postMenuButton: {
+    padding: 4,
+  },
+  postHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  followButtonSmall: {
+    backgroundColor: '#60a5fa',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginRight: 8,
+  },
+  followButtonTextSmall: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  bottomContent: {
+    flex: 1,
+  },
+  categoryTag: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#60a5fa',
+    borderRadius: 16,
+    height: 32,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  categoryText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 32,
+  },
+  actionIconContainer: {
+    position: 'relative',
+    alignItems: 'center',
+  },
+  commentCountBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -6,
+    backgroundColor: '#ff2d55',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#000',
+  },
+  commentCountText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: 'bold',
   },
 });

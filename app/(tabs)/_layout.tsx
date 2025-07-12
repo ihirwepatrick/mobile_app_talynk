@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import Colors from '@/constants/Colors';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import AuthGuard from '@/components/AuthGuard';
+import RealtimeProvider from '@/lib/realtime-context';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
@@ -37,12 +38,27 @@ export default function TabLayout() {
   const { logout } = useAuth();
 
   return (
-    <AuthGuard>
-      <Tabs
+    <RealtimeProvider>
+      <AuthGuard>
+        <Tabs
         screenOptions={{
           tabBarActiveTintColor: C.tabBarActive,
           tabBarInactiveTintColor: C.tabBarInactive,
-          tabBarStyle: { backgroundColor: C.tabBarBg, borderTopColor: C.tabBarBorder },
+          tabBarStyle: {
+            backgroundColor: 'rgba(0,0,0,0.9)',
+            borderTopColor: 'transparent',
+            position: 'absolute',
+            elevation: 8,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.3,
+            shadowRadius: 8,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            height: 60,
+            paddingBottom: 8,
+            paddingTop: 8,
+          },
           headerShown: useClientOnlyValue(false, true),
         }}>
         <Tabs.Screen
@@ -82,5 +98,6 @@ export default function TabLayout() {
         />
       </Tabs>
     </AuthGuard>
+    </RealtimeProvider>
   );
 }

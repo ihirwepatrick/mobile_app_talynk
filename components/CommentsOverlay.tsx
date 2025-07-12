@@ -11,35 +11,69 @@ import {
   useColorScheme,
   ActivityIndicator,
   Image,
+  ScrollView,
+  Dimensions,
+  Modal,
 } from 'react-native';
+import { formatDistanceToNow } from 'date-fns';
+import { Surface, TextInput as PaperInput, Button, Divider } from 'react-native-paper';
+
+const { width: screenWidth } = Dimensions.get('window');
 
 const COLORS = {
   dark: {
-    background: '#18181b',
-    card: '#232326',
-    border: '#27272a',
-    text: '#f3f4f6',
-    textSecondary: '#a1a1aa',
-    primary: '#60a5fa',
-    inputBg: '#232326',
-    inputBorder: '#27272a',
-    inputText: '#f3f4f6',
-    buttonBg: '#60a5fa',
-    buttonText: '#fff',
-    spinner: '#60a5fa',
+    background: '#000000',
+    card: '#1a1a1a',
+    border: '#2a2a2a',
+    text: '#ffffff',
+    textSecondary: '#8e8e93',
+    textTertiary: '#666666',
+    primary: '#0095f6',
+    inputBg: '#1a1a1a',
+    inputBorder: '#2a2a2a',
+    inputText: '#ffffff',
+    buttonBg: '#0095f6',
+    buttonText: '#ffffff',
+    spinner: '#0095f6',
+    likeColor: '#ed4956',
+  },
+  light: {
+    background: '#ffffff',
+    card: '#ffffff',
+    border: '#dbdbdb',
+    text: '#262626',
+    textSecondary: '#8e8e93',
+    textTertiary: '#666666',
+    primary: '#0095f6',
+    inputBg: '#ffffff',
+    inputBorder: '#dbdbdb',
+    inputText: '#262626',
+    buttonBg: '#0095f6',
+    buttonText: '#ffffff',
+    spinner: '#0095f6',
+    likeColor: '#ed4956',
   },
 };
 
 interface Comment {
-  id: string;
-  text: string;
-  user: {
+  id?: string;
+  comment_id?: string;
+  text?: string;
+  comment_text?: string;
+  user?: {
     id: string;
     name: string;
     avatar?: string;
     username?: string;
   };
-  created_at: string;
+  User?: {
+    id: string;
+    name: string;
+    avatar?: string;
+    username?: string;
+  };
+  created_at?: string;
+  comment_date?: string;
 }
 
 interface CommentsOverlayProps {
@@ -62,11 +96,14 @@ export default function CommentsOverlay({
   const [newComment, setNewComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const colorScheme = useColorScheme() || 'dark';
-  const C = COLORS.dark;
+  const C = COLORS[colorScheme];
+
+  // --- Emoji bar ---
+  const EMOJIS = ['❤️', '👏', '🔥', '😂', '😍', '😮', '👍', '🎉'];
+  const handleEmoji = (emoji: string) => setNewComment((c) => c + emoji);
 
   const handleSubmitComment = async () => {
     if (!newComment.trim() || submitting) return;
-
     setSubmitting(true);
     try {
       await onAddComment(newComment.trim());
@@ -78,44 +115,80 @@ export default function CommentsOverlay({
     }
   };
 
-  const renderComment = ({ item }: { item: Comment }) => (
-    <View style={styles.commentItem}>
-      <Image
-        source={{
-          uri: item.user.avatar || 'https://via.placeholder.com/32',
-        }}
-        style={styles.commentAvatar}
-      />
-      <View style={styles.commentContent}>
-        <View style={styles.commentHeader}>
-          <Text style={[styles.commentUsername, { color: C.text }]}>
-            {item.user.name}
-          </Text>
-          <Text style={[styles.commentDate, { color: C.textSecondary }]}>
-            {new Date(item.created_at).toLocaleDateString()}
-          </Text>
+  function getRelativeTime(dateString?: string) {
+    if (!dateString) return '';
+    try {
+      return formatDistanceToNow(new Date(dateString), { addSuffix: true });
+    } catch {
+      return 'recently';
+    }
+  }
+
+  const renderComment = ({ item }: { item: any }) => {
+    // Support both 'User' and 'user' fields for user info
+    const commentUser = item.User || item.user || {};
+    const commentText = item.comment_text || item.text || '';
+    const commentDate = item.comment_date || item.created_at;
+    
+    return (
+      <View style={styles.commentItem}>
+        <Image
+          source={{ uri: commentUser.avatar || 'https://via.placeholder.com/32' }}
+          style={styles.commentAvatar}
+        />
+        <View style={styles.commentContent}>
+          <View style={styles.commentHeader}>
+            <Text style={[styles.commentUsername, { color: C.text }]}>
+              {commentUser.name || commentUser.username || 'unknown'}
+            </Text>
+            <Text style={[styles.commentText, { color: C.text }]}>
+              {' '}{commentText}
+            </Text>
+          </View>
+          <View style={styles.commentFooter}>
+            <Text style={[styles.commentDate, { color: C.textSecondary }]}>
+              {getRelativeTime(commentDate)}
+            </Text>
+            <TouchableOpacity style={styles.commentAction}>
+              <Text style={[styles.commentActionText, { color: C.textSecondary }]}>Reply</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.commentAction}>
+              <Text style={[styles.commentActionText, { color: C.textSecondary }]}>Like</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        <Text style={[styles.commentText, { color: C.text }]}>
-          {item.text}
-        </Text>
       </View>
-    </View>
-  );
+    );
+  };
 
   if (!isVisible) return null;
 
   return (
-    <View style={[styles.overlay, { backgroundColor: 'rgba(0, 0, 0, 0.8)' }]}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+    <Modal
+      visible={isVisible}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.overlay}>
+        {/* Blurred Background */}
+        <View style={[styles.blurBackground, { backgroundColor: 'rgba(0, 0, 0, 0.6)' }]} />
+        
+        {/* Centered Modal Content */}
+        <View style={styles.modalContainer}>
+          <KeyboardAvoidingView
+            style={styles.container}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          >
         {/* Header */}
-        <View style={[styles.header, { backgroundColor: C.card, borderBottomColor: C.border }]}>
-          <Text style={[styles.headerTitle, { color: C.text }]}>Comments</Text>
-          <TouchableOpacity onPress={onClose}>
-            <Text style={[styles.closeButton, { color: C.primary }]}>✕</Text>
-          </TouchableOpacity>
+        <View style={[styles.header, { backgroundColor: C.card, borderBottomColor: C.border }]}> 
+          <View style={styles.headerContent}>
+            <Text style={[styles.headerTitle, { color: C.text }]}>Comments</Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <Text style={[styles.closeButtonText, { color: C.text }]}>✕</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Comments List */}
@@ -128,83 +201,123 @@ export default function CommentsOverlay({
             <FlatList
               data={comments}
               renderItem={renderComment}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item, index) => 
+                (item.comment_id ? item.comment_id.toString() :
+                item.id ? item.id.toString() :
+                `comment-${index}`)
+              }
               showsVerticalScrollIndicator={false}
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
-                  <Text style={[styles.emptyText, { color: C.textSecondary }]}>
-                    No comments yet
-                  </Text>
-                  <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>
-                    Be the first to comment!
-                  </Text>
+                  <Text style={[styles.emptyText, { color: C.textSecondary }]}>No comments yet</Text>
+                  <Text style={[styles.emptySubtext, { color: C.textTertiary }]}>Be the first to comment!</Text>
                 </View>
               }
+              contentContainerStyle={{ paddingBottom: 140 }}
+              ItemSeparatorComponent={() => <Divider style={[styles.separator, { backgroundColor: C.border }]} />}
             />
           )}
         </View>
 
-        {/* Comment Input */}
-        <View style={[styles.inputContainer, { backgroundColor: C.card, borderTopColor: C.border }]}>
-          <TextInput
-            style={[styles.commentInput, { backgroundColor: C.inputBg, color: C.inputText, borderColor: C.inputBorder }]}
-            placeholder="Add a comment..."
-            placeholderTextColor={C.textSecondary}
-            value={newComment}
-            onChangeText={setNewComment}
-            multiline
-            maxLength={500}
-          />
-          <TouchableOpacity
-            style={[
-              styles.sendButton,
-              { backgroundColor: newComment.trim() ? C.buttonBg : C.border },
-            ]}
-            onPress={handleSubmitComment}
-            disabled={!newComment.trim() || submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color={C.buttonText} />
-            ) : (
-              <Text style={[styles.sendButtonText, { color: C.buttonText }]}>Send</Text>
-            )}
-          </TouchableOpacity>
+        {/* Input Section */}
+        <View style={[styles.inputSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
+          {/* Emoji Bar */}
+          <View style={[styles.emojiBar, { backgroundColor: C.card, borderBottomColor: C.border }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.emojiScroll}>
+              {EMOJIS.map((emoji) => (
+                <TouchableOpacity key={emoji} onPress={() => handleEmoji(emoji)} style={styles.emojiButton}>
+                  <Text style={styles.emoji}>{emoji}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* Comment Input */}
+          <View style={styles.inputRow}>
+            <View style={[styles.inputContainer, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]}>
+              <TextInput
+                style={[styles.commentInput, { color: C.inputText }]}
+                placeholder="Add a comment..."
+                placeholderTextColor={C.textSecondary}
+                value={newComment}
+                onChangeText={setNewComment}
+                multiline
+                maxLength={500}
+                textAlignVertical="center"
+              />
+            </View>
+            <TouchableOpacity 
+              onPress={handleSubmitComment} 
+              disabled={!newComment.trim() || submitting}
+              style={[
+                styles.sendButton,
+                { 
+                  backgroundColor: newComment.trim() && !submitting ? C.primary : C.textTertiary,
+                  opacity: newComment.trim() && !submitting ? 1 : 0.5
+                }
+              ]}
+            >
+              {submitting ? (
+                <ActivityIndicator size="small" color={C.buttonText} />
+              ) : (
+                <Text style={[styles.sendButtonText, { color: C.buttonText }]}>Post</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
-    </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  blurBackground: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 1000,
+  },
+  modalContainer: {
+    width: '90%',
+    height: '80%',
+    backgroundColor: 'transparent',
+    borderRadius: 20,
+    overflow: 'hidden',
   },
   container: {
     flex: 1,
-    marginTop: 100,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
     overflow: 'hidden',
   },
   header: {
+    borderBottomWidth: 0.5,
+    paddingVertical: 16,
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
+    paddingHorizontal: 20,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '600',
   },
   closeButton: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    padding: 4,
+  },
+  closeButtonText: {
+    fontSize: 20,
+    fontWeight: '300',
   },
   commentsContainer: {
     flex: 1,
@@ -216,9 +329,8 @@ const styles = StyleSheet.create({
   },
   commentItem: {
     flexDirection: 'row',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#27272a',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   commentAvatar: {
     width: 32,
@@ -231,20 +343,37 @@ const styles = StyleSheet.create({
   },
   commentHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
   },
   commentUsername: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    marginRight: 8,
+  },
+  commentText: {
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+  },
+  commentFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
   },
   commentDate: {
     fontSize: 12,
+    marginRight: 12,
   },
-  commentText: {
-    fontSize: 14,
-    lineHeight: 20,
+  commentAction: {
+    marginRight: 12,
+  },
+  commentActionText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  separator: {
+    height: 0.5,
+    marginLeft: 64,
   },
   emptyContainer: {
     flex: 1,
@@ -261,28 +390,52 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  inputContainer: {
+  inputSection: {
+    borderTopWidth: 0.5,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+  },
+  emojiBar: {
+    borderBottomWidth: 0.5,
+    paddingVertical: 8,
+  },
+  emojiScroll: {
+    paddingHorizontal: 20,
+  },
+  emojiButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginRight: 4,
+  },
+  emoji: {
+    fontSize: 20,
+  },
+  inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    padding: 16,
-    borderTopWidth: 1,
+    paddingHorizontal: 20,
+    paddingTop: 12,
   },
-  commentInput: {
+  inputContainer: {
     flex: 1,
     borderWidth: 1,
     borderRadius: 20,
+    marginRight: 12,
+    minHeight: 36,
+    maxHeight: 100,
+  },
+  commentInput: {
+    fontSize: 14,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    marginRight: 12,
-    maxHeight: 100,
-    fontSize: 14,
+    textAlignVertical: 'center',
   },
   sendButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: 60,
+    borderRadius: 18,
+    minWidth: 50,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   sendButtonText: {
     fontSize: 14,

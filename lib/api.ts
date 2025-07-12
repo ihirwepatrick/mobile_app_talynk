@@ -84,7 +84,7 @@ export const postsApi = {
     } catch (error: any) {
       return {
         status: 'error',
-        message: 'Failed to create post',
+        message: error.response?.data?.message || 'Failed to create post',
         data: {} as Post,
       };
     }
@@ -128,6 +128,19 @@ export const postsApi = {
       };
     }
   },
+
+  getComments: async (postId: string) => {
+    const response = await apiClient.get(`/api/posts/${postId}/comments`);
+    return response.data;
+  },
+  addComment: async (postId: string, content: string) => {
+    const response = await apiClient.post(`/api/posts/${postId}/comments`, { comment_text: content });
+    return response.data;
+  },
+  deletePost: async (postId: string) => {
+    const response = await apiClient.delete(`/api/posts/${postId}`);
+    return response.data;
+  },
 };
 
 // User API
@@ -170,11 +183,16 @@ export const userApi = {
       };
     }
   },
+
+  getOwnPosts: async () => {
+    const response = await apiClient.get('/api/posts/user');
+    return response.data;
+  },
 };
 
 // Notifications API
 export const notificationsApi = {
-  getAll: async (): Promise<ApiResponse<Notification[]>> => {
+  getAll: async (): Promise<ApiResponse<{ notifications: Notification[] }>> => {
     try {
       const response = await apiClient.get('/api/user/notifications');
       return response.data;
@@ -182,7 +200,7 @@ export const notificationsApi = {
       return {
         status: 'error',
         message: 'Failed to fetch notifications',
-        data: [],
+        data: { notifications: [] },
       };
     }
   },
@@ -209,6 +227,49 @@ export const notificationsApi = {
         status: 'error',
         message: 'Failed to mark all notifications as read',
         data: {},
+      };
+    }
+  },
+};
+
+// Follow API methods
+export const followsApi = {
+  // Follow a user
+  follow: async (userId: string) => {
+    try {
+      const response = await apiClient.post('/api/follows', { userId });
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Cannot follow this user',
+        data: {},
+      };
+    }
+  },
+  // Unfollow a user
+  unfollow: async (userId: string) => {
+    try {
+      const response = await apiClient.delete(`/api/follows/followingid`, { data: { userId } });
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Cannot unfollow this user',
+        data: {},
+      };
+    }
+  },
+  // Check if following
+  checkFollowing: async (followingId: string) => {
+    try {
+      const response = await apiClient.get(`/api/follows/check/${followingId}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to check follow status',
+        data: { isFollowing: false },
       };
     }
   },
