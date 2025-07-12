@@ -119,9 +119,9 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
               justifyContent: 'center',
               marginBottom: 2,
             }}>
-              {React.cloneElement(icons[idx], { color: isFocused ? '#fff' : inactive })}
+              {React.cloneElement(icons[idx], { color: isFocused ? (isDark ? '#fff' : '#18181b') : inactive })}
             </View>
-            <Text style={{ color: isFocused ? '#fff' : inactive, fontSize: 13, fontWeight: isFocused ? 'bold' : '500' }}>{labels[idx]}</Text>
+            <Text style={{ color: isFocused ? (isDark ? '#fff' : '#18181b') : inactive, fontSize: 13, fontWeight: isFocused ? 'bold' : '500' }}>{labels[idx]}</Text>
             {isFocused && idx !== 2 && (
               <View style={{ height: 4, width: 32, backgroundColor: blue, borderRadius: 2, marginTop: 2 }} />
             )}
