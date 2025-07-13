@@ -118,6 +118,7 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
               alignItems: 'center',
               justifyContent: 'center',
               marginBottom: 2,
+              overflow: 'hidden',
             }}>
               {React.cloneElement(icons[idx], { color: isFocused ? (isDark ? '#fff' : '#18181b') : inactive })}
             </View>

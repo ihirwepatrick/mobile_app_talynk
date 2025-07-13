@@ -21,6 +21,7 @@ import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { Video, ResizeMode } from 'expo-av';
+import { uploadNotificationService } from '@/lib/notification-service';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -253,6 +254,13 @@ export default function CreatePostScreen() {
   // --- SUBMIT ---
   const handleCreatePost = async () => {
     if (!validate()) return;
+    
+    // Request notification permissions
+    const hasPermission = await uploadNotificationService.requestPermissions();
+    if (!hasPermission) {
+      console.log('Notification permissions not granted');
+    }
+    
     setUploading(true);
     setProgress(0);
     setUploadProgress(0);
@@ -281,11 +289,15 @@ export default function CreatePostScreen() {
       }
       
       let lastLoggedPercent = -10;
-      xhr.upload.onprogress = (event) => {
+      xhr.upload.onprogress = async (event) => {
         if (event.lengthComputable) {
           const percent = Math.round((event.loaded / event.total) * 100);
           setUploadProgress(percent);
           setProgress(percent);
+          
+          // Update notification with progress
+          await uploadNotificationService.showUploadProgress(percent, selectedMedia?.name);
+          
           if (percent - lastLoggedPercent >= 10 || percent === 100) {
             console.log(`Upload progress: ${percent}%`);
             lastLoggedPercent = percent;
@@ -293,7 +305,7 @@ export default function CreatePostScreen() {
         }
       };
       
-      xhr.onload = () => {
+      xhr.onload = async () => {
         setUploading(false);
         setUploadProgress(0);
         setProgress(0);
@@ -302,6 +314,9 @@ export default function CreatePostScreen() {
           try {
             const response = JSON.parse(xhr.responseText);
             if (response.status === 'success') {
+              // Show success notification
+              await uploadNotificationService.showUploadComplete(selectedMedia?.name);
+              
               Alert.alert(
                 'Success', 
                 'Post created successfully! It will be reviewed and appear in your profile.', 
@@ -317,20 +332,24 @@ export default function CreatePostScreen() {
                 ]
               );
             } else {
+              await uploadNotificationService.showUploadError(response.message || 'Failed to create post', selectedMedia?.name);
               Alert.alert('Error', response.message || 'Failed to create post');
             }
           } catch (e) {
+            await uploadNotificationService.showUploadError('Failed to parse server response', selectedMedia?.name);
             Alert.alert('Error', 'Failed to parse server response.');
           }
         } else {
+          await uploadNotificationService.showUploadError(`Server responded with status ${xhr.status}`, selectedMedia?.name);
           Alert.alert('Error', `Failed to create post. Server responded with status ${xhr.status}`);
         }
       };
       
-      xhr.onerror = () => {
+      xhr.onerror = async () => {
         setUploading(false);
         setUploadProgress(0);
         setProgress(0);
+        await uploadNotificationService.showUploadError('Network or server error', selectedMedia?.name);
         Alert.alert('Error', 'Failed to create post. Network or server error.');
       };
       
@@ -339,6 +358,7 @@ export default function CreatePostScreen() {
       setUploading(false);
       setUploadProgress(0);
       setProgress(0);
+      await uploadNotificationService.showUploadError(error.message || 'Failed to create post', selectedMedia?.name);
       Alert.alert('Error', error.message || 'Failed to create post. Please try again.');
     }
   };
