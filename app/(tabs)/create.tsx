@@ -272,7 +272,7 @@ export default function CreatePostScreen() {
       }
       
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${process.env.EXPO_PUBLIC_API_URL || 'https://talynk-backend.onrender.com'}/api/posts`);
+      xhr.open('POST', `${process.env.EXPO_PUBLIC_API_URL || 'https://talynkbackend-8fkrb.sevalla.app'}/api/posts`);
       xhr.setRequestHeader('Accept', 'application/json');
       
       const token = await AsyncStorage.getItem('talynk_token');
