@@ -107,8 +107,8 @@ export default function ExploreScreen() {
         await Promise.all(response.data.map(async (post) => {
           if (post.user?.id && user?.id !== post.user.id) {
             try {
-              const res = await followsApi.checkFollowing(post.user.id);
-              followStatus[post.user.id] = !!res.data?.isFollowing;
+            const res = await followsApi.checkFollowing(post.user.id);
+            followStatus[post.user.id] = !!res.data?.isFollowing;
             } catch {
               followStatus[post.user.id] = false;
             }
@@ -172,7 +172,7 @@ export default function ExploreScreen() {
     if (!user) return;
     setFollowing((prev) => ({ ...prev, [userId]: true }));
     try {
-      await followsApi.follow(userId);
+    await followsApi.follow(userId);
       sendFollowAction(userId, true);
     } catch (error) {
       setFollowing((prev) => ({ ...prev, [userId]: false }));
@@ -183,7 +183,7 @@ export default function ExploreScreen() {
     if (!user) return;
     setFollowing((prev) => ({ ...prev, [userId]: false }));
     try {
-      await followsApi.unfollow(userId);
+    await followsApi.unfollow(userId);
       sendFollowAction(userId, false);
     } catch (error) {
       setFollowing((prev) => ({ ...prev, [userId]: true }));
@@ -243,12 +243,12 @@ export default function ExploreScreen() {
               </View>
             </View>
           ) : (
-            <Image
+          <Image
               source={{ uri: mediaUrl }}
-              style={styles.postImage}
-              resizeMode="cover"
-            />
-          )}
+            style={styles.postImage}
+            resizeMode="cover"
+          />
+        )}
                      {item.category && (
              <View style={[styles.categoryTag, { backgroundColor: C.primary }]}>
                <Text style={[styles.categoryText, { color: C.buttonText }]}>
@@ -289,7 +289,7 @@ export default function ExploreScreen() {
               ]}>
                 {isFollowing ? 'Following' : 'Follow'}
               </Text>
-            </TouchableOpacity>
+              </TouchableOpacity>
           )}
         </TouchableOpacity>
 
@@ -382,15 +382,15 @@ export default function ExploreScreen() {
       <View style={[styles.searchContainer, { backgroundColor: C.card, borderBottomColor: C.border }]}> 
         <View style={[styles.searchInputContainer, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]}>
           <Feather name="search" size={20} color={C.textSecondary} style={styles.searchIcon} />
-          <TextInput
+        <TextInput
             style={[styles.searchInput, { color: C.inputText }]}
-            placeholder="Search posts, people, or topics..."
-            placeholderTextColor={C.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onSubmitEditing={handleSearch}
-            returnKeyType="search"
-          />
+          placeholder="Search posts, people, or topics..."
+          placeholderTextColor={C.textSecondary}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          onSubmitEditing={handleSearch}
+          returnKeyType="search"
+        />
         </View>
         <TouchableOpacity 
           style={[styles.searchButton, { backgroundColor: C.buttonBg }]} 

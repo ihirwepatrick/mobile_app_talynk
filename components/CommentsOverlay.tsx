@@ -61,7 +61,7 @@ interface Comment {
   text?: string;
   comment_text?: string;
   user?: {
-    id: string;
+  id: string;
     name: string;
     avatar?: string;
     username?: string;
@@ -131,24 +131,24 @@ export default function CommentsOverlay({
     const commentDate = item.comment_date || item.created_at;
     
     return (
-      <View style={styles.commentItem}>
-        <Image
+    <View style={styles.commentItem}>
+      <Image
           source={{ uri: commentUser.avatar || 'https://via.placeholder.com/32' }}
-          style={styles.commentAvatar}
-        />
-        <View style={styles.commentContent}>
-          <View style={styles.commentHeader}>
-            <Text style={[styles.commentUsername, { color: C.text }]}>
+        style={styles.commentAvatar}
+      />
+      <View style={styles.commentContent}>
+        <View style={styles.commentHeader}>
+          <Text style={[styles.commentUsername, { color: C.text }]}>
               {commentUser.name || commentUser.username || 'unknown'}
             </Text>
             <Text style={[styles.commentText, { color: C.text }]}>
               {' '}{commentText}
-            </Text>
+          </Text>
           </View>
           <View style={styles.commentFooter}>
-            <Text style={[styles.commentDate, { color: C.textSecondary }]}>
+          <Text style={[styles.commentDate, { color: C.textSecondary }]}>
               {getRelativeTime(commentDate)}
-            </Text>
+          </Text>
             <TouchableOpacity style={styles.commentAction}>
               <Text style={[styles.commentActionText, { color: C.textSecondary }]}>Reply</Text>
             </TouchableOpacity>
@@ -156,9 +156,9 @@ export default function CommentsOverlay({
               <Text style={[styles.commentActionText, { color: C.textSecondary }]}>Like</Text>
             </TouchableOpacity>
           </View>
-        </View>
       </View>
-    );
+    </View>
+  );
   };
 
   if (!isVisible) return null;
@@ -176,18 +176,18 @@ export default function CommentsOverlay({
         
         {/* Centered Modal Content */}
         <View style={styles.modalContainer}>
-          <KeyboardAvoidingView
-            style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-          >
+      >
         {/* Header */}
-        <View style={[styles.header, { backgroundColor: C.card, borderBottomColor: C.border }]}> 
+        <View style={[styles.header, { backgroundColor: C.card, borderBottomColor: C.border }]}>
           <View style={styles.headerContent}>
-            <Text style={[styles.headerTitle, { color: C.text }]}>Comments</Text>
+          <Text style={[styles.headerTitle, { color: C.text }]}>Comments</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
               <Text style={[styles.closeButtonText, { color: C.text }]}>✕</Text>
-            </TouchableOpacity>
+          </TouchableOpacity>
           </View>
         </View>
 
@@ -230,43 +230,43 @@ export default function CommentsOverlay({
                 </TouchableOpacity>
               ))}
             </ScrollView>
-          </View>
+        </View>
 
-          {/* Comment Input */}
+        {/* Comment Input */}
           <View style={styles.inputRow}>
             <View style={[styles.inputContainer, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]}>
-              <TextInput
+          <TextInput
                 style={[styles.commentInput, { color: C.inputText }]}
-                placeholder="Add a comment..."
-                placeholderTextColor={C.textSecondary}
-                value={newComment}
-                onChangeText={setNewComment}
-                multiline
-                maxLength={500}
+            placeholder="Add a comment..."
+            placeholderTextColor={C.textSecondary}
+            value={newComment}
+            onChangeText={setNewComment}
+            multiline
+            maxLength={500}
                 textAlignVertical="center"
-              />
+          />
             </View>
-            <TouchableOpacity 
+          <TouchableOpacity
               onPress={handleSubmitComment} 
               disabled={!newComment.trim() || submitting}
-              style={[
-                styles.sendButton,
+            style={[
+              styles.sendButton,
                 { 
                   backgroundColor: newComment.trim() && !submitting ? C.primary : C.textTertiary,
                   opacity: newComment.trim() && !submitting ? 1 : 0.5
                 }
-              ]}
-            >
-              {submitting ? (
-                <ActivityIndicator size="small" color={C.buttonText} />
-              ) : (
+            ]}
+          >
+            {submitting ? (
+              <ActivityIndicator size="small" color={C.buttonText} />
+            ) : (
                 <Text style={[styles.sendButtonText, { color: C.buttonText }]}>Post</Text>
-              )}
-            </TouchableOpacity>
+            )}
+          </TouchableOpacity>
           </View>
         </View>
       </KeyboardAvoidingView>
-        </View>
+    </View>
       </View>
     </Modal>
   );

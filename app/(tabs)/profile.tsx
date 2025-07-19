@@ -285,7 +285,7 @@ export default function ProfileScreen() {
   const handleDeletePost = async () => {
     if (!selectedPost) return;
     Alert.alert('Delete Post', 'Are you sure you want to delete this post?', [
-      { text: 'Cancel', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         setDeletingPost(true);
         try {
@@ -354,7 +354,7 @@ export default function ProfileScreen() {
   return (
     <View style={[styles.container, { backgroundColor: C.background }]}> 
       {/* Profile Header Modernized */}
-      <View style={[styles.header, { backgroundColor: C.card, borderBottomColor: C.border }]}> 
+      <View style={[styles.header, { backgroundColor: C.card, borderBottomColor: C.border }]}>
         <View style={{ alignItems: 'center', paddingTop: 24, paddingBottom: 16 }}>
           <View style={styles.avatarShadowWrapper}>
             <Image
@@ -416,7 +416,7 @@ export default function ProfileScreen() {
             onPress={() => setActiveTab(tab.key as 'approved' | 'pending' | 'rejected')}
           >
             <Text style={[styles.tabLabel, activeTab === tab.key && styles.tabLabelActive]}>{tab.label}</Text>
-          </TouchableOpacity>
+        </TouchableOpacity>
         ))}
       </View>
       {/* Tab Content */}
@@ -462,7 +462,7 @@ export default function ProfileScreen() {
                         </Text>
                       </TouchableOpacity>
                     )}
-                  </View>
+          </View>
                   
                   {/* Media */}
                   {mediaUrl ? (
@@ -470,7 +470,7 @@ export default function ProfileScreen() {
                       <View>
                         <Video
                           source={{ uri: mediaUrl }}
-                          style={styles.postImage}
+                    style={styles.postImage}
                           resizeMode={ResizeMode.COVER}
                           useNativeControls={false}
                           shouldPlay={false}
@@ -509,9 +509,9 @@ export default function ProfileScreen() {
                       <View style={[styles.categoryTag, { backgroundColor: C.primary }]}>
                         <Text style={[styles.categoryText, { color: C.buttonText }]}>
                           {getCategoryString(item.category || '')}
-                        </Text>
+                  </Text>
                       </View>
-                    )}
+                )}
                   </View>
                 </TouchableOpacity>
               );
@@ -584,8 +584,8 @@ export default function ProfileScreen() {
                                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{c.User?.name || c.User?.username || 'unknown'}</Text>
                                 <Text style={{ color: '#aaa', fontSize: 12 }}>{c.comment_text || c.content || ''}</Text>
                               </View>
-                            </View>
-                          ))}
+              </View>
+            ))}
                         </View>
                       )}
                       {/* Add comment input */}
@@ -645,7 +645,7 @@ export default function ProfileScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
-    </View>
+      </View>
   );
 }
 

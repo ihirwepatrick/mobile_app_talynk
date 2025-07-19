@@ -313,7 +313,7 @@ export default function CreatePostScreen() {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const response = JSON.parse(xhr.responseText);
-            if (response.status === 'success') {
+      if (response.status === 'success') {
               // Show success notification
               await uploadNotificationService.showUploadComplete(selectedMedia?.name);
               
@@ -331,10 +331,10 @@ export default function CreatePostScreen() {
                   }
                 ]
               );
-            } else {
+      } else {
               await uploadNotificationService.showUploadError(response.message || 'Failed to create post', selectedMedia?.name);
-              Alert.alert('Error', response.message || 'Failed to create post');
-            }
+        Alert.alert('Error', response.message || 'Failed to create post');
+      }
           } catch (e) {
             await uploadNotificationService.showUploadError('Failed to parse server response', selectedMedia?.name);
             Alert.alert('Error', 'Failed to parse server response.');
@@ -450,14 +450,14 @@ export default function CreatePostScreen() {
               </Text>
             </View>
           )}
-        </View>
+      </View>
 
         {/* Form Content */}
         <View style={styles.formContainer}>
-          {/* Title */}
+        {/* Title */}
           <View style={styles.inputGroup}>
             <Text style={[styles.label, { color: C.text }]}>Title</Text>
-            <TextInput
+        <TextInput
               style={[
                 styles.input, 
                 { 
@@ -467,17 +467,17 @@ export default function CreatePostScreen() {
                 }
               ]}
               placeholder="Give your post a compelling title"
-              placeholderTextColor={C.textSecondary}
-              value={title}
-              onChangeText={setTitle}
-            />
+          placeholderTextColor={C.textSecondary}
+          value={title}
+          onChangeText={setTitle}
+        />
             {errors.title && <Text style={[styles.errorText, { color: C.error }]}>{errors.title}</Text>}
           </View>
 
-          {/* Caption */}
+        {/* Caption */}
           <View style={styles.inputGroup}>
             <Text style={[styles.label, { color: C.text }]}>Caption</Text>
-            <TextInput
+        <TextInput
               style={[
                 styles.textarea, 
                 { 
@@ -487,17 +487,17 @@ export default function CreatePostScreen() {
                 }
               ]}
               placeholder="Describe your post and what makes it special..."
-              placeholderTextColor={C.textSecondary}
-              value={caption}
-              onChangeText={setCaption}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
+          placeholderTextColor={C.textSecondary}
+          value={caption}
+          onChangeText={setCaption}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+        />
             {errors.caption && <Text style={[styles.errorText, { color: C.error }]}>{errors.caption}</Text>}
           </View>
 
-          {/* Category Group */}
+        {/* Category Group */}
           <View style={styles.inputGroup}>
             <Text style={[styles.label, { color: C.text }]}>Category Group</Text>
             <ScrollView 
@@ -505,28 +505,28 @@ export default function CreatePostScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.pillRow}
             >
-              {MAIN_CATEGORY_GROUPS.map(group => (
-                <TouchableOpacity
-                  key={group}
+          {MAIN_CATEGORY_GROUPS.map(group => (
+            <TouchableOpacity
+              key={group}
                   style={[
                     styles.pill, 
                     selectedGroup === group && { backgroundColor: C.primary, borderColor: C.primary }
                   ]}
-                  onPress={() => { setSelectedGroup(group); setSelectedCategoryId(''); }}
-                >
+              onPress={() => { setSelectedGroup(group); setSelectedCategoryId(''); }}
+            >
                   <Text style={[
                     styles.pillText, 
                     { color: selectedGroup === group ? C.buttonText : C.text }
                   ]}>
                     {group}
                   </Text>
-                </TouchableOpacity>
-              ))}
+            </TouchableOpacity>
+          ))}
             </ScrollView>
             {errors.group && <Text style={[styles.errorText, { color: C.error }]}>{errors.group}</Text>}
-          </View>
+        </View>
 
-          {/* Specific Category */}
+        {/* Specific Category */}
           {selectedGroup && (
             <View style={styles.inputGroup}>
               <Text style={[styles.label, { color: C.text }]}>Specific Category</Text>
@@ -535,29 +535,29 @@ export default function CreatePostScreen() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.pillRow}
               >
-                {getCategoriesForGroup().map((cat: { id: number; name: string }) => (
-                  <TouchableOpacity
-                    key={cat.id}
+          {getCategoriesForGroup().map((cat: { id: number; name: string }) => (
+            <TouchableOpacity
+              key={cat.id}
                     style={[
                       styles.pill, 
                       selectedCategoryId === String(cat.id) && { backgroundColor: C.primary, borderColor: C.primary }
                     ]}
-                    onPress={() => setSelectedCategoryId(String(cat.id))}
-                  >
+              onPress={() => setSelectedCategoryId(String(cat.id))}
+            >
                     <Text style={[
                       styles.pillText, 
                       { color: selectedCategoryId === String(cat.id) ? C.buttonText : C.text }
                     ]}>
                       {cat.name}
                     </Text>
-                  </TouchableOpacity>
-                ))}
+            </TouchableOpacity>
+          ))}
               </ScrollView>
               {errors.category && <Text style={[styles.errorText, { color: C.error }]}>{errors.category}</Text>}
-            </View>
+        </View>
           )}
 
-          {/* Media Upload */}
+        {/* Media Upload */}
           <View style={styles.inputGroup}>
             <Text style={[styles.label, { color: C.text }]}>Media Upload</Text>
             <View style={[
@@ -573,29 +573,29 @@ export default function CreatePostScreen() {
                   <Text style={[styles.mediaUploadText, { color: C.textSecondary }]}>
                     Choose your media
                   </Text>
-                  <View style={styles.mediaButtonsRow}>
+          <View style={styles.mediaButtonsRow}>
                     <TouchableOpacity 
                       style={[styles.mediaButton, { backgroundColor: C.primary }]} 
                       onPress={() => pickMedia('image')}
                     >
                       <MaterialIcons name="photo-camera" size={20} color={C.buttonText} />
                       <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Image</Text>
-                    </TouchableOpacity>
+            </TouchableOpacity>
                     <TouchableOpacity 
                       style={[styles.mediaButton, { backgroundColor: C.primary }]} 
                       onPress={() => pickMedia('video')}
                     >
                       <MaterialIcons name="videocam" size={20} color={C.buttonText} />
                       <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Video</Text>
-                    </TouchableOpacity>
-                  </View>
+            </TouchableOpacity>
+          </View>
                 </View>
               ) : (
                 <View style={styles.mediaPreview}>
                   <View style={styles.previewContainer}>
-                    {selectedMedia.type === 'image' ? (
-                      <Image source={{ uri: selectedMedia.uri }} style={styles.previewImage} />
-                    ) : (
+              {selectedMedia.type === 'image' ? (
+                <Image source={{ uri: selectedMedia.uri }} style={styles.previewImage} />
+              ) : (
                       <View style={styles.videoPreview}>
                         <Video
                           source={{ uri: selectedMedia.uri }}
@@ -609,13 +609,13 @@ export default function CreatePostScreen() {
                           <MaterialIcons name="play-circle-outline" size={48} color="#fff" />
                         </View>
                       </View>
-                    )}
-                    <TouchableOpacity
-                      style={[styles.removeButton, { backgroundColor: C.error }]}
-                      onPress={removeMedia}
-                    >
+              )}
+              <TouchableOpacity
+                style={[styles.removeButton, { backgroundColor: C.error }]}
+                onPress={removeMedia}
+              >
                       <MaterialIcons name="close" size={20} color={C.buttonText} />
-                    </TouchableOpacity>
+              </TouchableOpacity>
                   </View>
                   <Text style={[styles.mediaFileName, { color: C.textSecondary }]}>
                     {selectedMedia.name}
@@ -624,29 +624,29 @@ export default function CreatePostScreen() {
               )}
             </View>
             {errors.media && <Text style={[styles.errorText, { color: C.error }]}>{errors.media}</Text>}
-          </View>
+        </View>
 
-          {/* Submit Button */}
-          <TouchableOpacity
-            style={[
-              styles.createButton, 
+        {/* Submit Button */}
+        <TouchableOpacity
+          style={[
+            styles.createButton, 
               { backgroundColor: C.primary },
-              uploading && styles.createButtonDisabled
-            ]}
-            onPress={handleCreatePost}
-            disabled={uploading}
-          >
-            {uploading ? (
+            uploading && styles.createButtonDisabled
+          ]}
+          onPress={handleCreatePost}
+          disabled={uploading}
+        >
+          {uploading ? (
               <ActivityIndicator color={C.buttonText} />
-            ) : (
+          ) : (
               <>
                 <MaterialIcons name="send" size={20} color={C.buttonText} />
                 <Text style={[styles.createButtonText, { color: C.buttonText }]}>Create Post</Text>
               </>
-            )}
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+          )}
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
     </View>
   );
 }
