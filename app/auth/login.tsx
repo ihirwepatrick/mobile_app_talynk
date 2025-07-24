@@ -81,7 +81,7 @@ export default function LoginScreen() {
       setSuccess('Login successful!');
       router.replace('/(tabs)');
     } else {
-      setError('Invalid username/email or password');
+      setError('Invalid credentials. Please check your username and password.');
     }
   };
 
@@ -92,8 +92,8 @@ export default function LoginScreen() {
     >
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <Text style={[styles.title, { color: C.text }]}>Sign in to Talynk</Text>
-          <Text style={[styles.subtitle, { color: C.textSecondary }]}>Welcome back! Please login to your account.</Text>
+          <Text style={[styles.title, { color: C.text }]}>Welcome to FarmMarket Pro 🌾</Text>
+          <Text style={[styles.subtitle, { color: C.textSecondary }]}>Sign in to access farming products and tools</Text>
         </View>
 
         {/* Alerts */}

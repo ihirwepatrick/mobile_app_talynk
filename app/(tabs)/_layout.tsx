@@ -9,7 +9,6 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 import Colors from '@/constants/Colors';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import AuthGuard from '@/components/AuthGuard';
-import RealtimeProvider from '@/lib/realtime-context';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
@@ -44,13 +43,13 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
   const blue = '#007AFF';
 
   const icons = [
-    <Feather name="home" size={26} />, // Feed
-    <Feather name="users" size={26} />, // Explore
-    <Feather name="plus" size={32} color={blue} />, // Upload
-    <Feather name="search" size={26} />, // Search
-    <Feather name="user" size={26} />, // Profile
+    <MaterialIcons name="home" size={26} />, // Home
+    <MaterialIcons name="explore" size={26} />, // Explore
+    <MaterialIcons name="add-shopping-cart" size={32} color={blue} />, // Add Product
+    <MaterialIcons name="notifications" size={26} />, // Notifications
+    <MaterialIcons name="person" size={26} />, // Profile
   ];
-  const labels = ['Home', 'Explore', 'Upload video', 'Search', 'My account'];
+  const labels = ['Home', 'Explore', 'Add Product', 'Orders', 'Profile'];
 
   return (
     <View style={{
@@ -96,7 +95,7 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
                   borderColor: bg,
                 }}
               >
-                <Feather name="plus" size={32} color={blue} />
+                <MaterialIcons name="add-shopping-cart" size={32} color={blue} />
               </TouchableOpacity>
               <Text style={{ color: isDark ? '#fff' : '#222', fontSize: 13, marginTop: 2, fontWeight: '500' }}>{labels[idx]}</Text>
             </View>
@@ -140,7 +139,6 @@ export default function TabLayout() {
 
   return (
     <View style={{ flex: 1, backgroundColor: 'transparent' }}>
-      <RealtimeProvider>
     <AuthGuard>
       <Tabs
             tabBar={props => <CustomTabBar {...props} />}
@@ -151,7 +149,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="index"
           options={{
-            title: 'Feed',
+            title: 'Home',
             tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,
           }}
         />
@@ -159,33 +157,32 @@ export default function TabLayout() {
           name="explore"
           options={{
             title: 'Explore',
-            tabBarIcon: ({ color }) => <TabBarIcon name="search" color={color} />,
+            tabBarIcon: ({ color }) => <TabBarIcon name="explore" color={color} />,
           }}
         />
         <Tabs.Screen
           name="create"
           options={{
-            title: 'Create',
-            tabBarIcon: ({ color }) => <TabBarIcon name="plus" color={color} />,
+            title: 'Add Product',
+            tabBarIcon: ({ color }) => <TabBarIcon name="add-shopping-cart" color={color} />,
           }}
         />
         <Tabs.Screen
           name="notifications"
           options={{
-            title: 'Notifications',
-            tabBarIcon: ({ color }) => <TabBarIcon name="bell" color={color} />,
+            title: 'Orders',
+            tabBarIcon: ({ color }) => <TabBarIcon name="notifications" color={color} />,
           }}
         />
         <Tabs.Screen
           name="profile"
           options={{
             title: 'Profile',
-            tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />,
+            tabBarIcon: ({ color }) => <TabBarIcon name="person" color={color} />,
           }}
         />
       </Tabs>
     </AuthGuard>
-    </RealtimeProvider>
     </View>
   );
 }

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  TextInput,
   FlatList,
   StyleSheet,
   TouchableOpacity,
@@ -14,490 +13,353 @@ import {
   RefreshControl,
 } from 'react-native';
 import { router } from 'expo-router';
-import { postsApi, userApi } from '@/lib/api';
-import { Post, User } from '@/types';
-import { followsApi } from '@/lib/api';
-import { useAuth } from '@/lib/auth-context';
-import { Feather } from '@expo/vector-icons';
-import { Video, ResizeMode } from 'expo-av';
-import { useRealtime } from '@/lib/realtime-context';
+import { productsApi } from '@/lib/products-api';
+import { Product, Category } from '@/types';
+import { MaterialIcons } from '@expo/vector-icons';
+import { Card, Searchbar, Chip, FAB } from 'react-native-paper';
+import { WhatsAppService } from '@/lib/whatsapp-service';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 const COLORS = {
-  dark: {
-    background: '#000000',
-    card: '#1a1a1a',
-    border: '#2a2a2a',
-    text: '#ffffff',
-    textSecondary: '#8e8e93',
-    textTertiary: '#666666',
-    primary: '#0095f6',
-    inputBg: '#1a1a1a',
-    inputBorder: '#2a2a2a',
-    inputText: '#ffffff',
-    buttonBg: '#0095f6',
-    buttonText: '#ffffff',
-    spinner: '#0095f6',
-    likeColor: '#ed4956',
-  },
   light: {
-    background: '#ffffff',
+    background: '#f8fafc',
     card: '#ffffff',
-    border: '#dbdbdb',
-    text: '#262626',
-    textSecondary: '#8e8e93',
-    textTertiary: '#666666',
-    primary: '#0095f6',
-    inputBg: '#ffffff',
-    inputBorder: '#dbdbdb',
-    inputText: '#262626',
-    buttonBg: '#0095f6',
-    buttonText: '#ffffff',
-    spinner: '#0095f6',
-    likeColor: '#ed4956',
+    text: '#1e293b',
+    textSecondary: '#64748b',
+    primary: '#22c55e',
+    secondary: '#3b82f6',
+    accent: '#f59e0b',
+    surface: '#ffffff',
+    outline: '#e2e8f0',
+  },
+  dark: {
+    background: '#0f172a',
+    card: '#1e293b',
+    text: '#f1f5f9',
+    textSecondary: '#94a3b8',
+    primary: '#22c55e',
+    secondary: '#60a5fa',
+    accent: '#fbbf24',
+    surface: '#1e293b',
+    outline: '#334155',
   },
 };
 
-// Categories for filtering
-const CATEGORIES = [
-  'All',
-  'Entertainment',
-  'Sports',
-  'Technology',
-  'Fashion',
-  'Food',
-  'Travel',
-  'Music',
-  'Comedy',
-  'Education',
+const PRICE_RANGES = [
+  { id: 'all', label: 'All Prices', min: 0, max: Infinity },
+  { id: 'under-10k', label: 'Under 10,000 RWF', min: 0, max: 10000 },
+  { id: '10k-50k', label: '10,000 - 50,000 RWF', min: 10000, max: 50000 },
+  { id: '50k-100k', label: '50,000 - 100,000 RWF', min: 50000, max: 100000 },
+  { id: 'over-100k', label: 'Over 100,000 RWF', min: 100000, max: Infinity },
 ];
 
 export default function ExploreScreen() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [trendingPosts, setTrendingPosts] = useState<Post[]>([]);
-  const [loadingTrending, setLoadingTrending] = useState(true);
-  const [recentSearches, setRecentSearches] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'trending' | 'foryou' | 'following'>('trending');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const [following, setFollowing] = useState<{ [userId: string]: boolean }>({});
-  const [followingSuggestions, setFollowingSuggestions] = useState<User[]>([]);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { user } = useAuth();
-  const { sendFollowAction } = useRealtime();
-  const colorScheme = useColorScheme() || 'dark';
-  const C = COLORS[colorScheme];
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedPriceRange, setSelectedPriceRange] = useState('all');
+  const [showFilters, setShowFilters] = useState(false);
+  const colorScheme = useColorScheme() || 'light';
+  const colors = COLORS[colorScheme];
 
   useEffect(() => {
-    fetchTrendingPosts();
-    fetchFollowingSuggestions();
+    loadInitialData();
   }, []);
 
-  const fetchTrendingPosts = async () => {
-    setLoadingTrending(true);
-    try {
-      const response = await postsApi.getAll(1, 20);
-      if (response.status === 'success') {
-        setTrendingPosts(response.data);
-        // Preload follow status for each user
-        const followStatus: { [userId: string]: boolean } = {};
-        await Promise.all(response.data.map(async (post) => {
-          if (post.user?.id && user?.id !== post.user.id) {
-            try {
-            const res = await followsApi.checkFollowing(post.user.id);
-            followStatus[post.user.id] = !!res.data?.isFollowing;
-            } catch {
-              followStatus[post.user.id] = false;
-            }
-          }
-        }));
-        setFollowing(followStatus);
-      }
-    } catch (error) {
-      console.error('Error fetching trending posts:', error);
-    } finally {
-      setLoadingTrending(false);
-      setRefreshing(false);
-    }
-  };
+  useEffect(() => {
+    loadProducts();
+  }, [selectedCategory, searchQuery]);
 
-  const fetchFollowingSuggestions = async () => {
-    setLoadingSuggestions(true);
-    try {
-      // For now, we'll use trending posts to get user suggestions
-      const response = await postsApi.getAll(1, 20);
-      if (response.status === 'success' && response.data) {
-        const uniqueUsers = response.data
-          .map(post => post.user)
-          .filter((user, index, arr) => user && arr.findIndex(u => u?.id === user.id) === index)
-          .slice(0, 10);
-        setFollowingSuggestions(uniqueUsers as User[]);
-      }
-    } catch (error) {
-      console.error('Error fetching suggestions:', error);
-    } finally {
-      setLoadingSuggestions(false);
-    }
-  };
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchTrendingPosts();
-    fetchFollowingSuggestions();
-  };
-
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
+  const loadInitialData = async () => {
     setLoading(true);
-    setRecentSearches((prev) => [searchQuery, ...prev.filter((s) => s !== searchQuery)].slice(0, 5));
     try {
-      const response = await postsApi.search(searchQuery);
-      if (response.status === 'success') {
-        setSearchResults(response.data);
+      const [productsResponse, categoriesResponse] = await Promise.all([
+        productsApi.getAll(),
+        productsApi.getCategories(),
+      ]);
+
+      if (productsResponse.status === 'success') {
+        setProducts(productsResponse.data);
+      }
+
+      if (categoriesResponse.status === 'success') {
+        setCategories(categoriesResponse.data);
       }
     } catch (error) {
-      console.error('Error searching:', error);
+      console.error('Error loading data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleFollow = async (userId: string) => {
-    if (!user) return;
-    setFollowing((prev) => ({ ...prev, [userId]: true }));
+  const loadProducts = async () => {
     try {
-    await followsApi.follow(userId);
-      sendFollowAction(userId, true);
+      const response = await productsApi.getAll(
+        selectedCategory === 'all' ? undefined : selectedCategory,
+        searchQuery
+      );
+
+      if (response.status === 'success') {
+        setProducts(response.data);
+      }
     } catch (error) {
-      setFollowing((prev) => ({ ...prev, [userId]: false }));
+      console.error('Error loading products:', error);
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  const handleUnfollow = async (userId: string) => {
-    if (!user) return;
-    setFollowing((prev) => ({ ...prev, [userId]: false }));
-    try {
-    await followsApi.unfollow(userId);
-      sendFollowAction(userId, false);
-    } catch (error) {
-      setFollowing((prev) => ({ ...prev, [userId]: true }));
-    }
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadProducts();
   };
 
-  const navigateToUserProfile = (userId: string) => {
+  const getFilteredProducts = () => {
+    let filtered = [...products];
+
+    // Apply price filter
+    if (selectedPriceRange !== 'all') {
+      const priceRange = PRICE_RANGES.find(r => r.id === selectedPriceRange);
+      if (priceRange) {
+        filtered = filtered.filter(p => p.price >= priceRange.min && p.price <= priceRange.max);
+      }
+    }
+
+    return filtered;
+  };
+
+  const handleProductPress = (product: Product) => {
     router.push({
-      pathname: '/user/[id]',
-      params: { id: userId }
+      pathname: '/product/[id]',
+      params: { id: product.id }
     });
   };
 
-  const navigateToPost = (postId: string) => {
-    router.push(`/post/${postId}` as any);
+  const handleQuickContact = async (product: Product) => {
+    const message = `Hi! I'm interested in ${product.name}. Is it available?`;
+    await WhatsAppService.contactSeller(product, message);
   };
 
-  const getFilteredPosts = () => {
-    const posts = activeTab === 'trending' ? trendingPosts : searchResults;
-    if (selectedCategory === 'All') return posts;
-    return posts.filter(post => {
-      const postCategory = typeof post.category === 'string' ? post.category : post.category?.name;
-      return postCategory === selectedCategory;
-    });
+  const formatPrice = (price: number, currency: string) => {
+    return `${price.toLocaleString()} ${currency}`;
   };
 
-  const isVideoPost = (post: Post) => {
-    const mediaUrl = post.video_url || post.videoUrl || '';
-    return mediaUrl.includes('.mp4') || mediaUrl.includes('.webm') || mediaUrl.includes('.mov');
+  const getCategoryColor = (categoryId: string) => {
+    const category = categories.find(c => c.id === categoryId);
+    return category?.color || '#6b7280';
   };
 
-  const renderPost = ({ item }: { item: Post }) => {
-    const isFollowing = following[item.user?.id || ''] || false;
-    const showFollow = user && item.user?.id && user.id !== item.user.id;
-    const mediaUrl = item.image || item.imageUrl || item.video_url || item.videoUrl || '';
-    const isVideo = isVideoPost(item);
-
-    return (
-      <TouchableOpacity 
-        style={[styles.postCard, { backgroundColor: C.card, borderColor: C.border }]}
-        onPress={() => navigateToPost(item.id)}
-      > 
-        {/* Media Preview */}
-        <View style={styles.mediaContainer}>
-          {isVideo ? (
-            <View style={styles.videoThumbnail}>
-              <Video
-                source={{ uri: mediaUrl }}
-                style={styles.postImage}
-                resizeMode={ResizeMode.COVER}
-                shouldPlay={false}
-                isMuted={true}
-                useNativeControls={false}
-              />
-              <View style={styles.playIconOverlay}>
-                <Feather name="play" size={20} color="#fff" />
-              </View>
+  const renderProduct = ({ item }: { item: Product }) => (
+    <Card style={[styles.productCard, { backgroundColor: colors.card }]} mode="elevated">
+      <TouchableOpacity onPress={() => handleProductPress(item)}>
+        <View style={styles.productImageContainer}>
+          <Image source={{ uri: item.image }} style={styles.productImage} />
+          <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(item.category) }]}>
+            <Text style={styles.categoryBadgeText}>{item.category.toUpperCase()}</Text>
+          </View>
+          {!item.inStock && (
+            <View style={styles.outOfStockOverlay}>
+              <Text style={styles.outOfStockText}>Out of Stock</Text>
             </View>
-          ) : (
-          <Image
-              source={{ uri: mediaUrl }}
-            style={styles.postImage}
-            resizeMode="cover"
-          />
-        )}
-                     {item.category && (
-             <View style={[styles.categoryTag, { backgroundColor: C.primary }]}>
-               <Text style={[styles.categoryText, { color: C.buttonText }]}>
-                 {typeof item.category === 'string' ? item.category : item.category.name}
-               </Text>
-             </View>
-           )}
+          )}
         </View>
-
-        {/* User Info */}
-        <TouchableOpacity 
-          style={styles.postInfoRow}
-          onPress={() => navigateToUserProfile(item.user?.id || '')}
-        >
-          <Image
-            source={{ uri: item.user?.avatar || item.user?.profile_picture || 'https://via.placeholder.com/32' }}
-            style={styles.avatar}
-          />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.username, { color: C.text }]} numberOfLines={1}>
-              {item.user?.name || item.user?.username || 'Unknown User'}
+        
+        <View style={styles.productContent}>
+          <Text style={[styles.productName, { color: colors.text }]} numberOfLines={2}>
+            {item.name}
+          </Text>
+          
+          <Text style={[styles.productDescription, { color: colors.textSecondary }]} numberOfLines={2}>
+            {item.description}
+          </Text>
+          
+          <View style={styles.priceRow}>
+            <Text style={[styles.productPrice, { color: colors.primary }]}>
+              {formatPrice(item.price, item.currency)}
             </Text>
-            <Text style={[styles.timestamp, { color: C.textSecondary }]} numberOfLines={1}>
-              {new Date(item.createdAt || '').toLocaleDateString()}
+            <Text style={[styles.productUnit, { color: colors.textSecondary }]}>
+              /{item.unit}
             </Text>
           </View>
-          {showFollow && (
-            <TouchableOpacity 
-              style={[
-                styles.followButtonSmall,
-                { backgroundColor: isFollowing ? 'transparent' : C.primary }
-              ]} 
-              onPress={() => isFollowing ? handleUnfollow(item.user!.id) : handleFollow(item.user!.id)}
+          
+          {item.brand && (
+            <Chip 
+              mode="outlined" 
+              compact 
+              style={styles.brandChip}
+              textStyle={{ fontSize: 10 }}
             >
-              <Text style={[
-                styles.followButtonTextSmall,
-                { color: isFollowing ? C.textSecondary : C.buttonText }
-              ]}>
-                {isFollowing ? 'Following' : 'Follow'}
-              </Text>
-              </TouchableOpacity>
+              {item.brand}
+            </Chip>
           )}
-        </TouchableOpacity>
-
-        {/* Post Content */}
-        <Text style={[styles.title, { color: C.text }]} numberOfLines={2}>
-          {item.title || item.caption || item.description || ''}
-        </Text>
-
-        {/* Post Stats */}
-        <View style={styles.postActionsRow}>
-          <Text style={[styles.actionText, { color: C.textSecondary }]}>
-            ❤️ {item.likes || item.likesCount || 0}
-          </Text>
-          <Text style={[styles.actionText, { color: C.textSecondary }]}>
-            💬 {item.comments_count || item.commentsCount || 0}
-          </Text>
+          
+          <View style={styles.productActions}>
+            <TouchableOpacity 
+              style={[styles.quickContactButton, { backgroundColor: '#25d366' }]}
+              onPress={() => handleQuickContact(item)}
+              disabled={!item.inStock}
+            >
+              <MaterialIcons name="chat" size={14} color="#fff" />
+              <Text style={styles.quickContactText}>Quick Contact</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.sellerInfo}>
+            <MaterialIcons name="store" size={12} color={colors.textSecondary} />
+            <Text style={[styles.sellerName, { color: colors.textSecondary }]} numberOfLines={1}>
+              {item.seller.name}
+            </Text>
+          </View>
         </View>
       </TouchableOpacity>
-    );
-  };
+    </Card>
+  );
 
-  const renderFollowingSuggestion = ({ item }: { item: User }) => {
-    const isFollowing = following[item.id] || false;
-    const showFollow = user && item.id && user.id !== item.id;
+  const renderCategory = ({ item }: { item: Category }) => (
+    <TouchableOpacity
+      style={[
+        styles.categoryChip,
+        { 
+          backgroundColor: selectedCategory === item.id ? item.color : colors.surface,
+          borderColor: item.color,
+        }
+      ]}
+      onPress={() => setSelectedCategory(item.id)}
+    >
+      <MaterialIcons 
+        name={item.icon as any} 
+        size={16} 
+        color={selectedCategory === item.id ? '#fff' : item.color} 
+      />
+      <Text style={[
+        styles.categoryText,
+        { color: selectedCategory === item.id ? '#fff' : colors.text }
+      ]}>
+        {item.name}
+      </Text>
+    </TouchableOpacity>
+  );
 
+  const renderPriceRange = ({ item }: { item: typeof PRICE_RANGES[0] }) => (
+    <Chip
+      mode={selectedPriceRange === item.id ? 'flat' : 'outlined'}
+      selected={selectedPriceRange === item.id}
+      onPress={() => setSelectedPriceRange(item.id)}
+      style={styles.priceChip}
+      textStyle={{ fontSize: 12 }}
+    >
+      {item.label}
+    </Chip>
+  );
+
+  if (loading) {
     return (
-      <View style={[styles.suggestionCard, { backgroundColor: C.card, borderColor: C.border }]}>
-        <TouchableOpacity 
-          style={styles.suggestionUserInfo}
-          onPress={() => navigateToUserProfile(item.id)}
-        >
-          <Image
-            source={{ uri: item.avatar || item.profile_picture || 'https://via.placeholder.com/48' }}
-            style={styles.suggestionAvatar}
-          />
-          <View style={styles.suggestionText}>
-            <Text style={[styles.suggestionName, { color: C.text }]} numberOfLines={1}>
-              {item.name || item.username}
-            </Text>
-            <Text style={[styles.suggestionUsername, { color: C.textSecondary }]} numberOfLines={1}>
-              @{item.username}
-            </Text>
-          </View>
-        </TouchableOpacity>
-        {showFollow && (
-          <TouchableOpacity 
-            style={[
-              styles.followButtonSmall,
-              { backgroundColor: isFollowing ? 'transparent' : C.primary }
-            ]} 
-            onPress={() => isFollowing ? handleUnfollow(item.id) : handleFollow(item.id)}
-          >
-            <Text style={[
-              styles.followButtonTextSmall,
-              { color: isFollowing ? C.textSecondary : C.buttonText }
-            ]}>
-              {isFollowing ? 'Following' : 'Follow'}
-            </Text>
-          </TouchableOpacity>
-        )}
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.text }]}>Loading products...</Text>
       </View>
     );
-  };
+  }
 
   return (
-    <View style={[styles.container, { backgroundColor: C.background }]}> 
-      {/* Content Switcher Tabs */}
-      <View style={styles.tabsRow}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: colors.surface }]}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Explore Products 🔍
+        </Text>
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'trending' && styles.tabActive]} 
-          onPress={() => setActiveTab('trending')}
+          style={styles.filterToggle}
+          onPress={() => setShowFilters(!showFilters)}
         >
-          <Text style={[styles.tabText, activeTab === 'trending' && styles.tabTextActive]}>Trending</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'foryou' && styles.tabActive]} 
-          onPress={() => setActiveTab('foryou')}
-        >
-          <Text style={[styles.tabText, activeTab === 'foryou' && styles.tabTextActive]}>For You</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'following' && styles.tabActive]} 
-          onPress={() => setActiveTab('following')}
-        >
-          <Text style={[styles.tabText, activeTab === 'following' && styles.tabTextActive]}>Following</Text>
+          <MaterialIcons 
+            name="tune" 
+            size={24} 
+            color={colors.text} 
+          />
         </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
-      <View style={[styles.searchContainer, { backgroundColor: C.card, borderBottomColor: C.border }]}> 
-        <View style={[styles.searchInputContainer, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]}>
-          <Feather name="search" size={20} color={C.textSecondary} style={styles.searchIcon} />
-        <TextInput
-            style={[styles.searchInput, { color: C.inputText }]}
-          placeholder="Search posts, people, or topics..."
-          placeholderTextColor={C.textSecondary}
-          value={searchQuery}
+      <View style={styles.searchSection}>
+        <Searchbar
+          placeholder="Search farming products..."
           onChangeText={setSearchQuery}
-          onSubmitEditing={handleSearch}
-          returnKeyType="search"
+          value={searchQuery}
+          style={[styles.searchBar, { backgroundColor: colors.surface }]}
+          inputStyle={{ color: colors.text }}
+          iconColor={colors.textSecondary}
         />
-        </View>
-        <TouchableOpacity 
-          style={[styles.searchButton, { backgroundColor: C.buttonBg }]} 
-          onPress={handleSearch}
-        >
-          <Text style={[styles.searchButtonText, { color: C.buttonText }]}>Search</Text>
-        </TouchableOpacity>
       </View>
 
-      {/* Category Filter */}
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false}
-        style={styles.categoryContainer}
-        contentContainerStyle={styles.categoryContent}
-      >
-        {CATEGORIES.map((category) => (
-          <TouchableOpacity
-            key={category}
-            style={[
-              styles.categoryPill,
-              selectedCategory === category && { backgroundColor: C.primary }
-            ]}
-            onPress={() => setSelectedCategory(category)}
-          >
-            <Text style={[
-              styles.categoryPillText,
-              { color: selectedCategory === category ? C.buttonText : C.text }
-            ]}>
-              {category}
+      {/* Filters */}
+      {showFilters && (
+        <View style={[styles.filtersSection, { backgroundColor: colors.surface }]}>
+          {/* Categories */}
+          <Text style={[styles.filterTitle, { color: colors.text }]}>Categories</Text>
+          <FlatList
+            data={categories}
+            renderItem={renderCategory}
+            keyExtractor={(item) => item.id}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoriesList}
+          />
+          
+          {/* Price Ranges */}
+          <Text style={[styles.filterTitle, { color: colors.text }]}>Price Range</Text>
+          <FlatList
+            data={PRICE_RANGES}
+            renderItem={renderPriceRange}
+            keyExtractor={(item) => item.id}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.priceRangesList}
+          />
+        </View>
+      )}
+
+      {/* Products Grid */}
+      <FlatList
+        data={getFilteredProducts()}
+        renderItem={renderProduct}
+        keyExtractor={(item) => item.id}
+        numColumns={2}
+        columnWrapperStyle={styles.productRow}
+        contentContainerStyle={styles.productsList}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <MaterialIcons name="search-off" size={64} color={colors.textSecondary} />
+            <Text style={[styles.emptyText, { color: colors.text }]}>
+              No products found
             </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-      {/* Divider */}
-      <View style={styles.divider} />
-
-      {/* Recent Searches */}
-      {recentSearches.length > 0 && (
-        <View style={styles.recentSearchesBox}>
-          <Text style={[styles.recentSearchesTitle, { color: C.textSecondary }]}>Recent Searches</Text>
-          <View style={styles.recentSearchesRow}>
-            {recentSearches.map((s) => (
-              <View key={s} style={[styles.recentSearchPill, { backgroundColor: C.card }]}>
-                <Text style={{ color: C.text }}>{s}</Text>
-                <TouchableOpacity onPress={() => setRecentSearches(recentSearches.filter((x) => x !== s))}>
-                  <Text style={{ color: C.textSecondary, marginLeft: 4 }}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-            <TouchableOpacity onPress={() => setRecentSearches([])}>
-              <Text style={{ color: C.textSecondary, marginLeft: 8 }}>Clear All</Text>
-            </TouchableOpacity>
+            <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+              Try adjusting your search or filters
+            </Text>
           </View>
-        </View>
-      )}
+        }
+      />
 
-      {/* Following Suggestions */}
-      {activeTab === 'following' && (
-        <View style={styles.suggestionsContainer}>
-          <Text style={[styles.sectionTitle, { color: C.text, fontSize: 15, marginBottom: 6 }]}>Suggested for You</Text>
-          {loadingSuggestions ? (
-            <ActivityIndicator size="small" color={C.spinner} />
-          ) : (
-            <FlatList
-              data={followingSuggestions}
-              renderItem={renderFollowingSuggestion}
-              keyExtractor={(item) => item.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.suggestionsList}
-            />
-          )}
-        </View>
-      )}
-
-      {/* Grid of Posts */}
-      {loadingTrending ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={C.spinner} />
-        </View>
-      ) : (
-        <FlatList
-          data={getFilteredPosts()}
-          renderItem={renderPost}
-          keyExtractor={(item) => item.id}
-          numColumns={2}
-          columnWrapperStyle={styles.gridRow}
-          contentContainerStyle={{ padding: 10, paddingTop: 0 }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={C.primary}
-              colors={[C.primary]}
-            />
-          }
-          ListEmptyComponent={
-            <View style={[styles.emptyContainer, { flex: 0.5, marginTop: 0 }]}>
-              <Text style={[styles.emptyText, { color: C.text }]}>No posts found</Text>
-              <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>
-                {selectedCategory !== 'All' ? `Try a different category` : 'Try searching for something else'}
-              </Text>
-            </View>
-          }
-        />
-      )}
+      {/* Floating Action Button */}
+      <FAB
+        icon="headset"
+        label="Need Help?"
+        style={[styles.fab, { backgroundColor: colors.secondary }]}
+        onPress={() => WhatsAppService.contactBusiness('Hello! I need help finding farming products.')}
+        color="#fff"
+      />
     </View>
   );
 }
@@ -506,285 +368,208 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  tabsRow: {
-    flexDirection: 'row',
-    backgroundColor: '#1a1a1a',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
-  tab: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  tabActive: {
-    backgroundColor: '#0095f6',
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#8e8e93',
-  },
-  tabTextActive: {
-    color: '#ffffff',
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    padding: 15,
-    borderBottomWidth: 1,
-    alignItems: 'center',
-  },
-  searchInputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    marginRight: 10,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: 10,
-    fontSize: 16,
-  },
-  searchButton: {
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    justifyContent: 'center',
-  },
-  searchButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  categoryContainer: {
-    paddingVertical: 10,
-    marginBottom: 10,
-    marginTop: 10,
-  },
-  categoryContent: {
-    paddingHorizontal: 15,
-  },
-  categoryPill: {
-    height: 32,
-    paddingHorizontal: 18,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-    backgroundColor: '#2a2a2a',
-  },
-  categoryPillText: {
-    fontSize: 13,
-    fontWeight: '500',
-    textAlign: 'center',
-    lineHeight: 32,
-  },
-  recentSearchesBox: {
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
-  },
-  recentSearchesTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 10,
-  },
-  recentSearchesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-  },
-  recentSearchPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginRight: 8,
-    marginBottom: 4,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#232326',
-    marginVertical: 10,
-    marginHorizontal: 0,
-    marginBottom: 10,
-  },
-  suggestionsContainer: {
-    paddingTop: 0,
-    paddingBottom: 0,
-    paddingLeft: 10,
-    paddingRight: 0,
-    marginBottom: 0,
-    borderBottomWidth: 0,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 12,
-  },
-  suggestionsList: {
-    paddingRight: 10,
-    paddingVertical: 0,
-    paddingTop: 0,
-    paddingBottom: 0,
-  },
-  suggestionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 8,
-    borderRadius: 10,
-    marginRight: 8,
-    minWidth: 140,
-    maxWidth: 180,
-    borderWidth: 1,
-    borderColor: '#232326',
-    backgroundColor: '#18181b',
-  },
-  suggestionUserInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  suggestionAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 8,
-  },
-  suggestionText: {
-    flex: 1,
-  },
-  suggestionName: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 1,
-  },
-  suggestionUsername: {
-    fontSize: 11,
-    color: '#8e8e93',
-  },
-  postCard: {
-    width: (screenWidth - 30) / 2,
-    marginBottom: 15,
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: 1,
-  },
-  mediaContainer: {
-    position: 'relative',
-    width: '100%',
-    height: 150,
-  },
-  postImage: {
-    width: '100%',
-    height: '100%',
-  },
-  videoThumbnail: {
-    position: 'relative',
-    width: '100%',
-    height: '100%',
-  },
-  playIconOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  categoryTag: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    height: 32,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  categoryText: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 32,
-  },
-  postInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    paddingBottom: 8,
-  },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 8,
-  },
-  username: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  timestamp: {
-    fontSize: 10,
-  },
-  followButtonSmall: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#0095f6',
-  },
-  followButtonTextSmall: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  title: {
-    fontSize: 12,
-    lineHeight: 16,
-    paddingHorizontal: 12,
-    paddingBottom: 8,
-  },
-  postActionsRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-  },
-  actionText: {
-    fontSize: 10,
-    marginRight: 12,
-  },
-  gridRow: {
-    justifyContent: 'space-between',
-  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  filterToggle: {
+    padding: 8,
+  },
+  searchSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  searchBar: {
+    elevation: 0,
+    borderRadius: 12,
+  },
+  filtersSection: {
+    paddingVertical: 16,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  filterTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 16,
+    marginBottom: 8,
+  },
+  categoriesList: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 6,
+  },
+  categoryText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  priceRangesList: {
+    paddingHorizontal: 16,
+  },
+  priceChip: {
+    marginRight: 8,
+    marginBottom: 4,
+  },
+  productsList: {
+    paddingHorizontal: 12,
+    paddingBottom: 100,
+  },
+  productRow: {
+    justifyContent: 'space-between',
+  },
+  productCard: {
+    width: (screenWidth - 36) / 2,
+    marginBottom: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  productImageContainer: {
+    position: 'relative',
+    height: 120,
+  },
+  productImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  categoryBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  categoryBadgeText: {
+    color: '#fff',
+    fontSize: 8,
+    fontWeight: 'bold',
+  },
+  outOfStockOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  outOfStockText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  productContent: {
+    padding: 12,
+  },
+  productName: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginBottom: 4,
+    lineHeight: 16,
+  },
+  productDescription: {
+    fontSize: 11,
+    lineHeight: 14,
+    marginBottom: 8,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginBottom: 8,
+  },
+  productPrice: {
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  productUnit: {
+    fontSize: 10,
+  },
+  brandChip: {
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+    height: 20,
+  },
+  productActions: {
+    marginBottom: 8,
+  },
+  quickContactButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    borderRadius: 6,
+    gap: 4,
+  },
+  quickContactText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  sellerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  sellerName: {
+    fontSize: 10,
+    flex: 1,
+  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    paddingVertical: 60,
   },
   emptyText: {
     fontSize: 18,
     fontWeight: '600',
+    marginTop: 16,
     marginBottom: 8,
   },
   emptySubtext: {
     fontSize: 14,
     textAlign: 'center',
+    lineHeight: 20,
   },
-}); 
+  fab: {
+    position: 'absolute',
+    margin: 16,
+    right: 0,
+    bottom: 80,
+  },
+});

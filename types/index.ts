@@ -1,5 +1,38 @@
 // Type definitions for the mobile app
 
+export interface Product {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  currency: string;
+  category: 'chemicals' | 'tools' | 'seeds' | 'fertilizers' | 'equipment';
+  image: string;
+  images?: string[];
+  inStock: boolean;
+  stockQuantity?: number;
+  unit: string; // kg, liters, pieces, etc.
+  brand?: string;
+  specifications?: { [key: string]: string };
+  createdAt: string;
+  updatedAt: string;
+  seller: {
+    id: string;
+    name: string;
+    phone: string;
+    whatsapp?: string;
+    location?: string;
+  };
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  description: string;
+}
+
 export interface ApiResponse<T> {
   status: 'success' | 'error';
   message: string;

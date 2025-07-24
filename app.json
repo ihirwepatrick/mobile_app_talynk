@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Talynk Social",
-    "slug": "talynk-social",
+    "name": "FarmMarket Pro",
+    "slug": "farm-market-pro",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "talynk",
+    "scheme": "farmmarket",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.talynk.social",
+      "bundleIdentifier": "com.farmmarket.pro",
       "buildNumber": "1"
     },
     "android": {
@@ -24,7 +24,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.talynk.social",
+      "package": "com.farmmarket.pro",
       "versionCode": 1,
       "permissions": [
         "android.permission.CAMERA",
@@ -32,7 +32,8 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.INTERNET",
         "android.permission.RECORD_AUDIO",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.CALL_PHONE"
       ]
     },
     "web": {

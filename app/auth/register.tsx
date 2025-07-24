@@ -178,8 +178,8 @@ export default function RegisterScreen() {
     >
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <Text style={[styles.title, { color: C.text }]}>Create your account</Text>
-          <Text style={[styles.subtitle, { color: C.textSecondary }]}>Sign up to join Talynk.</Text>
+          <Text style={[styles.title, { color: C.text }]}>Join FarmMarket Pro 🌾</Text>
+          <Text style={[styles.subtitle, { color: C.textSecondary }]}>Create your account to start buying and selling farming products</Text>
         </View>
 
         {/* Alerts */}
