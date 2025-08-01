@@ -6,7 +6,7 @@
  */
 
 // API URL with fallback for production
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://talynk-backend.onrender.com';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://talynkbackend-8fkrb.sevalla.app';
 
 // JWT Secret
 export const JWT_SECRET = process.env.JWT_SECRET || 'wUq9wpIDBRGr3n7KDw86GiV15gZlNEEK';

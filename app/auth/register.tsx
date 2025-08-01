@@ -155,15 +155,15 @@ export default function RegisterScreen() {
           // Attempt registration
       try {
         const success = await register(registrationData);
-        if (success) {
+    if (success) {
           setShowSuccessOverlay(true);
-        } else {
+    } else {
           // The error message will be handled by the auth context
           // We don't need to set a generic error here
         }
       } catch (err: any) {
         setWarning(err.message || 'Registration failed. Please try again.');
-      }
+    }
   };
 
   const openTerms = () => {

@@ -118,6 +118,7 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
               alignItems: 'center',
               justifyContent: 'center',
               marginBottom: 2,
+              overflow: 'hidden',
             }}>
               {React.cloneElement(icons[idx], { color: isFocused ? (isDark ? '#fff' : '#18181b') : inactive })}
             </View>
@@ -140,50 +141,50 @@ export default function TabLayout() {
   return (
     <View style={{ flex: 1, backgroundColor: 'transparent' }}>
       <RealtimeProvider>
-        <AuthGuard>
-          <Tabs
+    <AuthGuard>
+      <Tabs
             tabBar={props => <CustomTabBar {...props} />}
-            screenOptions={{
-              headerShown: useClientOnlyValue(false, true),
+        screenOptions={{
+          headerShown: useClientOnlyValue(false, true),
             }}
           >
-          <Tabs.Screen
-            name="index"
-            options={{
-              title: 'Feed',
-              tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,
-            }}
-          />
-          <Tabs.Screen
-            name="explore"
-            options={{
-              title: 'Explore',
-              tabBarIcon: ({ color }) => <TabBarIcon name="search" color={color} />,
-            }}
-          />
-          <Tabs.Screen
-            name="create"
-            options={{
-              title: 'Create',
-              tabBarIcon: ({ color }) => <TabBarIcon name="plus" color={color} />,
-            }}
-          />
-          <Tabs.Screen
-            name="notifications"
-            options={{
-              title: 'Notifications',
-              tabBarIcon: ({ color }) => <TabBarIcon name="bell" color={color} />,
-            }}
-          />
-          <Tabs.Screen
-            name="profile"
-            options={{
-              title: 'Profile',
-              tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />,
-            }}
-          />
-        </Tabs>
-      </AuthGuard>
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: 'Feed',
+            tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="explore"
+          options={{
+            title: 'Explore',
+            tabBarIcon: ({ color }) => <TabBarIcon name="search" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="create"
+          options={{
+            title: 'Create',
+            tabBarIcon: ({ color }) => <TabBarIcon name="plus" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="notifications"
+          options={{
+            title: 'Notifications',
+            tabBarIcon: ({ color }) => <TabBarIcon name="bell" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: 'Profile',
+            tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />,
+          }}
+        />
+      </Tabs>
+    </AuthGuard>
     </RealtimeProvider>
     </View>
   );

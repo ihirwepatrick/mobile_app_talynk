@@ -16,7 +16,7 @@ import {
   Animated,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { postsApi } from '@/lib/api';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
@@ -121,27 +121,57 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
     initialComments: item.comments_count || 0,
     initialIsLiked: isLiked,
   });
-  const [videoRef, setVideoRef] = useState<Video | null>(null);
+  const videoRef = useRef<Video>(null);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
   const { isMuted, setIsMuted } = useMute();
   const [localMuted, setLocalMuted] = useState(true);
   const [videoError, setVideoError] = useState(false);
+  const [videoLoaded, setVideoLoaded] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
   const insets = useSafeAreaInsets();
   
   // Like animation
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
 
+  // Handle video play/pause based on active state
   useEffect(() => {
-    if (videoRef) {
+    if (videoRef.current && videoLoaded) {
       if (isActive) {
-        videoRef.playAsync && videoRef.playAsync();
+        // Simple play when active
+        videoRef.current.playAsync().catch((error) => {
+          console.log('Video play failed:', error);
+        });
       } else {
-        videoRef.pauseAsync && videoRef.pauseAsync();
+        // Simple pause when not active
+        videoRef.current.pauseAsync().catch((error) => {
+          console.log('Video pause failed:', error);
+        });
+        setIsPlaying(false);
       }
     }
-  }, [isActive, videoRef]);
+  }, [isActive, videoLoaded]);
+
+  // Reset progress when video becomes inactive
+  useEffect(() => {
+    if (!isActive) {
+      setVideoProgress(0);
+      setIsPlaying(false);
+    }
+  }, [isActive]);
+
+  // Cleanup effect
+  useEffect(() => {
+    return () => {
+      // Cleanup video when component unmounts
+      if (videoRef.current) {
+        videoRef.current.pauseAsync().catch(() => {});
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setLocalMuted(isMuted);
@@ -153,6 +183,33 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
 
   const handleMuteIconPress = () => {
     setIsMuted(!isMuted);
+  };
+
+  const handleVideoLoad = () => {
+    setVideoLoaded(true);
+    console.log('Video loaded for post:', item.id);
+  };
+
+  const handleVideoError = (error: any) => {
+    console.log('Video error for post:', item.id, error);
+    setVideoError(true);
+    // Don't let video errors affect the overall component state
+    setIsPlaying(false);
+  };
+
+  const handlePlaybackStatusUpdate = (status: any) => {
+    if (status.isLoaded) {
+      setVideoDuration(status.durationMillis || 0);
+      setVideoProgress(status.positionMillis || 0);
+      setIsPlaying(status.isPlaying);
+    }
+  };
+
+  const formatTime = (milliseconds: number) => {
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
   const handleLike = async () => {
@@ -259,23 +316,38 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
 
       <View style={styles.mediaContainer}>
         {isVideo ? (
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={handleVideoTap}>
-            <Video
-              ref={setVideoRef}
+          videoError ? (
+            // Fallback to image if video fails
+            <Image
               source={{ uri: mediaUrl }}
-              style={styles.video}
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay={isActive}
-              isLooping
-              isMuted={localMuted}
-              onError={() => setVideoError(true)}
-              useNativeControls={false}
+              style={styles.image}
+              resizeMode="contain"
+              onError={() => setImageError(true)}
             />
-            {/* Mute/Unmute Icon Top Right */}
-            <TouchableOpacity style={[styles.muteIconTopRight, { top: insets.top + 60 }]} onPress={handleMuteIconPress}>
-              <Feather name={localMuted ? 'volume-x' : 'volume-2'} size={28} color="#fff" />
+          ) : (
+            <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={handleVideoTap}>
+              <Video
+                ref={videoRef}
+                source={{ uri: mediaUrl }}
+                style={styles.video}
+                resizeMode={ResizeMode.CONTAIN}
+                shouldPlay={isActive}
+                isLooping
+                isMuted={localMuted}
+                onLoad={handleVideoLoad}
+                onError={handleVideoError}
+                useNativeControls={false}
+                shouldCorrectPitch={true}
+                volume={localMuted ? 0.0 : 1.0}
+                posterStyle={{ resizeMode: 'cover' }}
+                onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+              />
+              {/* Mute/Unmute Icon Top Right */}
+              <TouchableOpacity style={[styles.muteIconTopRight, { top: insets.top + 60 }]} onPress={handleMuteIconPress}>
+                <Feather name={localMuted ? 'volume-x' : 'volume-2'} size={28} color="#fff" />
+              </TouchableOpacity>
             </TouchableOpacity>
-          </TouchableOpacity>
+          )
         ) : (
           <Image
             source={{ uri: imageError ? 'https://via.placeholder.com/300x500' : mediaUrl }}
@@ -285,7 +357,7 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
           />
         )}
         {/* Right Side Actions */}
-        <View style={[styles.rightActions, { bottom: 200 + insets.bottom }]}>
+        <View style={[styles.rightActions, { bottom: 320 + insets.bottom }]}>
           {/* Like Button */}
           <TouchableOpacity style={styles.actionButton} onPress={handleLike} disabled={isLiking}>
             <Animated.View style={{ transform: [{ scale: likeScale }] }}>
@@ -331,10 +403,27 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
           </TouchableOpacity>
         </View>
         {/* Bottom Info Overlay */}
-        <View style={[styles.bottomOverlay, { paddingBottom: 120 + insets.bottom }]}>
+        <View style={[styles.bottomOverlay, { paddingBottom: 200 + insets.bottom }]}>
           <View style={styles.gradient} />
           <View style={styles.bottomInfoRow}>
             <View style={styles.bottomContent}>
+              {/* Video Progress Bar - Above Caption */}
+              {isVideo && videoDuration > 0 && (
+                <View style={styles.videoProgressContainer}>
+                  <View style={styles.videoProgressBar}>
+                    <View 
+                      style={[
+                        styles.videoProgressFill, 
+                        { width: `${(videoProgress / videoDuration) * 100}%` }
+                      ]} 
+                    />
+                  </View>
+                  <View style={styles.videoTimeContainer}>
+                    <Text style={styles.videoTimeText}>{formatTime(videoProgress)}</Text>
+                    <Text style={styles.videoTimeText}>{formatTime(videoDuration)}</Text>
+                  </View>
+                </View>
+              )}
               <Text style={styles.caption} numberOfLines={3}>{item.description || item.title || ''}</Text>
               {item.category && (
                 <View style={styles.categoryTag}>
@@ -359,9 +448,11 @@ export default function FeedScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
+  const [lastPlayingVideo, setLastPlayingVideo] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(true);
   const flatListRef = useRef<FlatList>(null);
   const { user } = useAuth();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const [commentsVisible, setCommentsVisible] = useState(false);
   const [activeCommentsPostId, setActiveCommentsPostId] = useState<string | null>(null);
@@ -423,6 +514,28 @@ export default function FeedScreen() {
   useEffect(() => {
     loadPosts();
   }, []);
+
+  // Simple solution to pause videos when leaving the screen
+  useEffect(() => {
+    const blurUnsubscribe = navigation.addListener('blur', () => {
+      // Save current video and pause all videos when leaving the feeds screen
+      setLastPlayingVideo(currentlyPlaying);
+      setCurrentlyPlaying(null);
+    });
+
+    const focusUnsubscribe = navigation.addListener('focus', () => {
+      // Resume the last playing video when returning to the feeds screen
+      if (lastPlayingVideo) {
+        setCurrentlyPlaying(lastPlayingVideo);
+        setLastPlayingVideo(null);
+      }
+    });
+
+    return () => {
+      blurUnsubscribe();
+      focusUnsubscribe();
+    };
+  }, [navigation, currentlyPlaying, lastPlayingVideo]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -554,12 +667,16 @@ export default function FeedScreen() {
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems.length > 0) {
       const currentPostId = viewableItems[0].item.id;
+      console.log('Currently playing post:', currentPostId);
       setCurrentlyPlaying(currentPostId);
+    } else {
+      setCurrentlyPlaying(null);
     }
   }).current;
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 80,
+    itemVisiblePercentThreshold: 50, // Lower threshold for faster response
+    minimumViewTime: 100, // Minimum time item must be visible
   }).current;
 
   if (loading && posts.length === 0) {
@@ -709,7 +826,7 @@ const styles = StyleSheet.create({
   },
   gradient: {
     ...StyleSheet.absoluteFillObject,
-    height: 200,
+    height: 250,
     bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.7)',
   },
@@ -717,7 +834,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingBottom: 20,
+    paddingBottom: 40,
     zIndex: 21,
   },
   avatar: {
@@ -924,4 +1041,33 @@ const styles = StyleSheet.create({
     transform: [{ translateX: -24 }, { translateY: -24 }],
     zIndex: 100,
   },
+  videoProgressContainer: {
+    marginBottom: 12,
+  },
+  videoProgressBar: {
+    height: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 5,
+  },
+  videoProgressFill: {
+    height: '100%',
+    backgroundColor: '#60a5fa',
+    borderRadius: 2,
+  },
+  videoTimeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  videoTimeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '500',
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
 });
+

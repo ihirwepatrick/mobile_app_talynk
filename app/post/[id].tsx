@@ -224,8 +224,10 @@ export default function PostDetailScreen() {
               style={styles.media}
               resizeMode={ResizeMode.CONTAIN}
               useNativeControls
-              shouldPlay={false}
-              isLooping={false}
+              shouldPlay={true}
+              isLooping={true}
+              shouldCorrectPitch={true}
+              volume={1.0}
             />
           ) : (
             <Image source={{ uri: mediaUrl }} style={styles.media} resizeMode="contain" />

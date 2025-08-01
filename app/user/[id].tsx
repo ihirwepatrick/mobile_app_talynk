@@ -19,8 +19,10 @@ import { useAuth } from '@/lib/auth-context';
 import { userApi, followsApi, postsApi } from '@/lib/api';
 import { User, Post } from '@/types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { Video, ResizeMode } from 'expo-av';
+import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { useRealtime } from '@/lib/realtime-context';
+import RealtimeProvider from '@/lib/realtime-context';
+import { useNavigation } from '@react-navigation/native';
 
 const COLORS = {
   light: {
@@ -48,10 +50,28 @@ const COLORS = {
 export default function ExternalUserProfileScreen() {
   const { id } = useLocalSearchParams();
   const { user: currentUser } = useAuth();
+
+  // Redirect if this is the logged-in user
+  useEffect(() => {
+    if (currentUser && currentUser.id === id) {
+      router.replace('/(tabs)/profile');
+    }
+  }, [currentUser, id]);
+  if (currentUser && currentUser.id === id) return null;
+
+  return (
+    <RealtimeProvider>
+      <ProfileContent id={id} currentUser={currentUser} />
+    </RealtimeProvider>
+  );
+}
+
+function ProfileContent(props: { id: string | string[] | undefined, currentUser: User | null }) {
+  const { id, currentUser } = props;
   const [profile, setProfile] = useState<User | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [approvedPosts, setApprovedPosts] = useState<any[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [postsError, setPostsError] = useState<string | null>(null);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -62,12 +82,12 @@ export default function ExternalUserProfileScreen() {
   const { sendFollowAction } = useRealtime();
   const colorScheme = useColorScheme() || 'light';
   const C = COLORS[colorScheme];
+  const navigation = useNavigation();
 
   // Fetch profile info
   useEffect(() => {
     const fetchProfile = async () => {
       if (!id) return;
-      
       setLoadingProfile(true);
       setProfileError(null);
       try {
@@ -100,17 +120,17 @@ export default function ExternalUserProfileScreen() {
     checkFollow();
   }, [id, currentUser]);
 
-  // Fetch user posts
+  // Fetch approved posts
   useEffect(() => {
-    const fetchPosts = async () => {
+    const fetchApprovedPosts = async () => {
       if (!id) return;
-      
       setLoadingPosts(true);
       setPostsError(null);
       try {
-        const response = await userApi.getUserPosts(id as string);
+        const response = await userApi.getUserApprovedPosts(id as string);
         if (response.status === 'success' && response.data) {
-          setPosts(response.data);
+          setApprovedPosts(response.data);
+          console.log('Approved posts:', response.data); // Debug output
         } else {
           setPostsError(response.message || 'Failed to fetch posts');
         }
@@ -120,7 +140,7 @@ export default function ExternalUserProfileScreen() {
         setLoadingPosts(false);
       }
     };
-    fetchPosts();
+    fetchApprovedPosts();
   }, [id]);
 
   // Refresh function
@@ -132,15 +152,13 @@ export default function ExternalUserProfileScreen() {
         if (id) {
           const [profileResponse, postsResponse] = await Promise.all([
             userApi.getUserById(id as string),
-            userApi.getUserPosts(id as string)
+            userApi.getUserApprovedPosts(id as string)
           ]);
-          
           if (profileResponse.status === 'success' && profileResponse.data) {
             setProfile(profileResponse.data);
           }
-          
           if (postsResponse.status === 'success' && postsResponse.data) {
-            setPosts(postsResponse.data);
+            setApprovedPosts(postsResponse.data);
           }
         }
       } catch (err: any) {
@@ -235,10 +253,15 @@ export default function ExternalUserProfileScreen() {
     }
   };
 
-  function getPostMedia(post: Post) {
-    const url = post.video_url || post.image;
-    const type = post.video_url ? 'video' : 'image';
-    return { url, type };
+  function getPostMedia(post: any) {
+    if (Array.isArray(post.media) && post.media[0]) {
+      return { url: post.media[0].url, type: post.media[0].type };
+    }
+    if (post.image) return { url: post.image, type: 'image' };
+    if (post.imageUrl) return { url: post.imageUrl, type: 'image' };
+    if (post.video_url) return { url: post.video_url, type: 'video' };
+    if (post.videoUrl) return { url: post.videoUrl, type: 'video' };
+    return { url: '', type: '' };
   }
 
   function getCategoryString(category: string | object) {
@@ -248,6 +271,15 @@ export default function ExternalUserProfileScreen() {
     }
     return 'Unknown';
   }
+
+  // Set the header title to the user's name or username
+  useEffect(() => {
+    if (profile) {
+      navigation.setOptions({
+        title: profile.name || profile.username || 'Profile',
+      });
+    }
+  }, [profile, navigation]);
 
   if (loadingProfile) {
     return (
@@ -281,15 +313,6 @@ export default function ExternalUserProfileScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: C.background }]}>
-      {/* Header with back button */}
-      <View style={[styles.header, { backgroundColor: C.card, borderBottomColor: C.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <MaterialIcons name="arrow-back" size={24} color={C.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: C.text }]}>Profile</Text>
-        <View style={styles.headerSpacer} />
-      </View>
-
       <ScrollView 
         style={styles.scrollView}
         refreshControl={
@@ -343,7 +366,7 @@ export default function ExternalUserProfileScreen() {
           {/* Stats */}
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: C.text }]}>{posts.length}</Text>
+              <Text style={[styles.statValue, { color: C.text }]}>{approvedPosts.length}</Text>
               <Text style={[styles.statLabel, { color: C.textSecondary }]}>Posts</Text>
             </View>
             <View style={styles.statItem}>
@@ -379,7 +402,6 @@ export default function ExternalUserProfileScreen() {
         {/* Posts Section */}
         <View style={styles.postsSection}>
           <Text style={[styles.sectionTitle, { color: C.text }]}>Posts</Text>
-          
           {loadingPosts ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color={C.primary} />
@@ -388,77 +410,66 @@ export default function ExternalUserProfileScreen() {
             <View style={styles.loadingContainer}>
               <Text style={[styles.errorText, { color: 'red' }]}>{postsError}</Text>
             </View>
-          ) : posts.length === 0 ? (
+          ) : approvedPosts.length === 0 ? (
             <View style={styles.emptyContainer}>
               <MaterialIcons name="photo-library" size={48} color={C.textSecondary} />
               <Text style={[styles.emptyText, { color: C.textSecondary }]}>No posts yet</Text>
             </View>
           ) : (
             <FlatList
-              data={posts}
+              data={approvedPosts}
               renderItem={({ item }) => {
                 const { url: mediaUrl, type: mediaType } = getPostMedia(item);
                 return (
                   <TouchableOpacity 
                     onPress={() => handlePostPress(item)}
-                    style={styles.postCard}
+                    style={[styles.postCard, { backgroundColor: C.card }]}
                   >
-                    {/* User Info Header */}
-                    <View style={styles.postHeader}>
-                      <View style={styles.postUserInfo}>
-                        <Image
-                          source={{ uri: profile?.profile_picture || 'https://via.placeholder.com/24' }}
-                          style={styles.postUserAvatar}
-                        />
-                        <Text style={[styles.postUsername, { color: C.text }]}>@{profile?.username}</Text>
-                      </View>
-                    </View>
-                    
-                    {/* Media */}
+                    {/* Media Thumbnail */}
                     {mediaUrl ? (
-                      mediaType === 'video' ? (
-                        <View>
-                          <Video
-                            source={{ uri: mediaUrl }}
-                            style={styles.postImage}
-                            resizeMode={ResizeMode.COVER}
-                            useNativeControls={false}
-                            shouldPlay={false}
-                            isLooping={false}
-                          />
+                      <View style={{ position: 'relative' }}>
+                        <Image 
+                          source={{ uri: mediaUrl }} 
+                          style={styles.postImage} 
+                          resizeMode="cover" 
+                        />
+                        {mediaType === 'video' && (
                           <View style={styles.playIconOverlay}>
                             <MaterialIcons name="play-circle-outline" size={48} color="#fff" />
                           </View>
-                        </View>
-                      ) : (
-                        <Image source={{ uri: mediaUrl }} style={styles.postImage} resizeMode="cover" />
-                      )
-                    ) : null}
-                    
+                        )}
+                      </View>
+                    ) : (
+                      <Image
+                        source={{ uri: 'https://via.placeholder.com/150' }}
+                        style={styles.postImage}
+                        resizeMode="cover"
+                      />
+                    )}
                     {/* Caption and Category */}
                     <View style={styles.postFooter}>
                       <Text style={[styles.postCaption, { color: C.text }]} numberOfLines={2}>
-                        {item.caption || ''}
+                        {item.title || item.description || ''}
                       </Text>
                       <View style={styles.postFooterActions}>
                         <View style={styles.postAction}>
                           <Feather 
                             name="heart" 
                             size={16} 
-                            color={(item.likes || 0) > 0 ? "#ff2d55" : C.textSecondary} 
-                            fill={(item.likes || 0) > 0 ? "#ff2d55" : "none"}
+                            color={(item.likesCount || 0) > 0 ? "#ff2d55" : C.textSecondary} 
+                            fill={(item.likesCount || 0) > 0 ? "#ff2d55" : "none"}
                           />
-                          <Text style={[styles.postActionText, { color: C.textSecondary }]}>{item.likes || 0}</Text>
+                          <Text style={[styles.postActionText, { color: C.textSecondary }]}>{item.likesCount || 0}</Text>
                         </View>
                         <View style={styles.postAction}>
                           <Feather name="message-circle" size={16} color={C.textSecondary} />
-                          <Text style={[styles.postActionText, { color: C.textSecondary }]}>{item.comments_count || 0}</Text>
+                          <Text style={[styles.postActionText, { color: C.textSecondary }]}>{item.commentsCount || 0}</Text>
                         </View>
                       </View>
-                      {item.category && (
-                        <View style={[styles.categoryTag, { backgroundColor: C.primary }]}>
-                          <Text style={[styles.categoryText, { color: C.buttonText }]}>
-                            {getCategoryString(item.category)}
+                      {item.categoryName && (
+                        <View style={[styles.categoryTag, { backgroundColor: C.primary }]}> 
+                          <Text style={[styles.categoryText, { color: C.buttonText }]}> 
+                            {item.categoryName}
                           </Text>
                         </View>
                       )}
@@ -475,10 +486,9 @@ export default function ExternalUserProfileScreen() {
           )}
         </View>
       </ScrollView>
-
       {/* Post Modal Overlay */}
       <Modal visible={postModalVisible} animationType="slide" transparent onRequestClose={handleClosePostModal}>
-        <View style={styles.overlayBackdrop}>
+        <View style={[styles.overlayBackdrop, { backgroundColor: 'rgba(0,0,0,0.95)' }]}> 
           <View style={styles.overlayContent}>
             <TouchableOpacity style={styles.overlayClose} onPress={handleClosePostModal}>
               <MaterialIcons name="close" size={28} color="#fff" />
@@ -487,17 +497,31 @@ export default function ExternalUserProfileScreen() {
               const { url: mediaUrl, type: mediaType } = getPostMedia(selectedPost);
               return (
                 <View style={styles.overlayMediaContainer}>
-                  {mediaType === 'video' ? (
-                    <Video
-                      source={{ uri: mediaUrl || '' }}
-                      style={styles.overlayMedia}
-                      resizeMode={ResizeMode.CONTAIN}
-                      useNativeControls={true}
-                      shouldPlay={true}
-                      isLooping={true}
-                    />
+                  {mediaUrl ? (
+                    mediaType === 'video' ? (
+                      <Video
+                        source={{ uri: mediaUrl }}
+                        style={styles.overlayMedia}
+                        resizeMode={ResizeMode.CONTAIN}
+                        useNativeControls={true}
+                        shouldPlay={true}
+                        isLooping={true}
+                        shouldCorrectPitch={true}
+                        volume={1.0}
+                      />
+                    ) : (
+                      <Image
+                        source={{ uri: mediaUrl }}
+                        style={styles.overlayMedia}
+                        resizeMode="contain"
+                      />
+                    )
                   ) : (
-                    <Image source={{ uri: mediaUrl || '' }} style={styles.overlayMedia} resizeMode="contain" />
+                    <Image
+                      source={{ uri: 'https://via.placeholder.com/300' }}
+                      style={styles.overlayMedia}
+                      resizeMode="contain"
+                    />
                   )}
                   <View style={styles.overlayActions}>
                     <TouchableOpacity style={styles.overlayAction} onPress={handleSharePost}>

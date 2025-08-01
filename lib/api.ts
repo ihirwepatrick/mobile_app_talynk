@@ -297,6 +297,19 @@ export const userApi = {
     const response = await apiClient.get('/api/posts/user');
     return response.data;
   },
+
+  getUserApprovedPosts: async (userId: string, page = 1, limit = 10) => {
+    try {
+      const response = await apiClient.get(`/api/users/${userId}/posts/approved?page=${page}&limit=${limit}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: 'Failed to fetch user approved posts',
+        data: [],
+      };
+    }
+  },
 };
 
 // Notifications API

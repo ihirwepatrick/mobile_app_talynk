@@ -87,7 +87,7 @@ mobile-app/
 
 The mobile app connects to the same backend API as the web application:
 
-- **Base URL**: `https://talynk-backend.onrender.com`
+- **Base URL**: `https://talynkbackend-8fkrb.sevalla.app`
 - **Authentication**: JWT tokens stored in AsyncStorage
 - **Endpoints**: Posts, users, notifications, and media upload
 
@@ -140,7 +140,7 @@ The mobile app connects to the same backend API as the web application:
 Create a `.env` file in the root directory:
 
 ```env
-EXPO_PUBLIC_API_URL=https://talynk-backend.onrender.com
+EXPO_PUBLIC_API_URL=https://talynkbackend-8fkrb.sevalla.app
 ```
 
 ### App Configuration
