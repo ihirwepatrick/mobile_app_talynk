@@ -310,6 +310,19 @@ export const userApi = {
       };
     }
   },
+
+  getSuggestions: async () => {
+    try {
+      const response = await apiClient.get('/api/users/suggestions');
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: 'Failed to fetch user suggestions',
+        data: [],
+      };
+    }
+  },
 };
 
 // Notifications API
@@ -392,6 +405,32 @@ export const followsApi = {
         status: 'error',
         message: error.response?.data?.message || 'Failed to check follow status',
         data: { isFollowing: false },
+      };
+    }
+  },
+  // Get followers
+  getFollowers: async (userId: string) => {
+    try {
+      const response = await apiClient.get(`/api/follows/followers/${userId}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch followers',
+        data: [],
+      };
+    }
+  },
+  // Get following
+  getFollowing: async (userId: string) => {
+    try {
+      const response = await apiClient.get(`/api/follows/following/${userId}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch following',
+        data: [],
       };
     }
   },

@@ -367,18 +367,45 @@ export default function ProfileScreen() {
           <Text style={styles.profileUsernameLarge}>@{profile?.username}</Text>
           {profile?.bio ? <Text style={styles.profileBioLarge}>{profile.bio}</Text> : null}
           <View style={styles.statsRow}>
-            <View style={styles.statItem}>
+            <TouchableOpacity 
+              style={styles.statItem}
+              onPress={() => {
+                console.log('Navigating to followers page with posts type');
+                router.push({
+                  pathname: '/followers/[id]' as any,
+                  params: { id: userId, type: 'posts' }
+                });
+              }}
+            >
               <Text style={styles.statValue}>{profile?.postsCount ?? 0}</Text>
               <Text style={styles.statLabel}>Posts</Text>
-            </View>
-            <View style={styles.statItem}>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.statItem}
+              onPress={() => {
+                console.log('Navigating to followers page with followers type');
+                router.push({
+                  pathname: '/followers/[id]' as any,
+                  params: { id: userId, type: 'followers' }
+                });
+              }}
+            >
               <Text style={styles.statValue}>{profile?.followersCount ?? 0}</Text>
               <Text style={styles.statLabel}>Followers</Text>
-            </View>
-            <View style={styles.statItem}>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.statItem}
+              onPress={() => {
+                console.log('Navigating to followers page with following type');
+                router.push({
+                  pathname: '/followers/[id]' as any,
+                  params: { id: userId, type: 'following' }
+                });
+              }}
+            >
               <Text style={styles.statValue}>{profile?.followingCount ?? 0}</Text>
               <Text style={styles.statLabel}>Following</Text>
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
         <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.menuButton}>
@@ -1032,6 +1059,11 @@ const styles = StyleSheet.create({
   statItem: {
     alignItems: 'center',
     flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginHorizontal: 4,
   },
   statValue: {
     fontSize: 18,

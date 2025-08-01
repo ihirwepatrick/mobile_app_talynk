@@ -79,7 +79,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [postModalVisible, setPostModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const { sendFollowAction } = useRealtime();
+  const { sendFollowAction, isConnected } = useRealtime();
   const colorScheme = useColorScheme() || 'light';
   const C = COLORS[colorScheme];
   const navigation = useNavigation();
@@ -120,26 +120,87 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     checkFollow();
   }, [id, currentUser]);
 
-  // Fetch approved posts
+  // Real-time updates for profile stats
   useEffect(() => {
-    const fetchApprovedPosts = async () => {
-      if (!id) return;
-      setLoadingPosts(true);
-      setPostsError(null);
-      try {
-        const response = await userApi.getUserApprovedPosts(id as string);
-        if (response.status === 'success' && response.data) {
-          setApprovedPosts(response.data);
-          console.log('Approved posts:', response.data); // Debug output
-        } else {
-          setPostsError(response.message || 'Failed to fetch posts');
+    if (!isConnected || !id) return;
+
+    // Listen for new posts from this user
+    const handleNewPost = (data: any) => {
+      if (data.userId === id) {
+        console.log('New post detected for user:', id);
+        // Refresh posts and update count
+        fetchApprovedPosts();
+        // Update profile stats
+        if (profile) {
+          setProfile(prev => prev ? { ...prev, posts_count: (prev.posts_count || 0) + 1 } : null);
         }
-      } catch (err: any) {
-        setPostsError(err.message || 'Failed to fetch posts');
-      } finally {
-        setLoadingPosts(false);
       }
     };
+
+    // Listen for follow/unfollow actions
+    const handleFollowAction = (data: any) => {
+      if (data.targetUserId === id) {
+        console.log('Follow action detected for user:', id);
+        // Update followers count
+        if (profile) {
+          const newFollowersCount = data.action === 'follow' 
+            ? (profile.followers_count || 0) + 1 
+            : Math.max(0, (profile.followers_count || 0) - 1);
+          setProfile(prev => prev ? { ...prev, followers_count: newFollowersCount } : null);
+        }
+      }
+    };
+
+    // Listen for post approval/rejection
+    const handlePostStatusChange = (data: any) => {
+      if (data.userId === id) {
+        console.log('Post status change detected for user:', id);
+        // Refresh posts to get updated list
+        fetchApprovedPosts();
+        // Update profile stats based on action
+        if (profile) {
+          const newPostsCount = data.action === 'approve' 
+            ? (profile.posts_count || 0) + 1 
+            : Math.max(0, (profile.posts_count || 0) - 1);
+          setProfile(prev => prev ? { ...prev, posts_count: newPostsCount } : null);
+        }
+      }
+    };
+
+    // Set up real-time listeners using the existing realtime context
+    // This will depend on your realtime context implementation
+    // For now, we'll use a polling approach as fallback
+    const pollInterval = setInterval(() => {
+      // Poll for updates every 30 seconds
+      fetchApprovedPosts();
+    }, 30000);
+
+    return () => {
+      clearInterval(pollInterval);
+    };
+  }, [isConnected, id, profile]);
+
+  // Fetch approved posts
+  const fetchApprovedPosts = async () => {
+    if (!id) return;
+    setLoadingPosts(true);
+    setPostsError(null);
+    try {
+      const response = await userApi.getUserApprovedPosts(id as string);
+      if (response.status === 'success' && response.data) {
+        setApprovedPosts(response.data);
+        console.log('Approved posts:', response.data); // Debug output
+      } else {
+        setPostsError(response.message || 'Failed to fetch posts');
+      }
+    } catch (err: any) {
+      setPostsError(err.message || 'Failed to fetch posts');
+    } finally {
+      setLoadingPosts(false);
+    }
+  };
+
+  useEffect(() => {
     fetchApprovedPosts();
   }, [id]);
 
@@ -178,9 +239,13 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       const response = await followsApi.follow(id as string);
       if (response.status === 'success') {
         setIsFollowing(true);
-        // Update followers count
+        // Update followers count immediately
         if (profile) {
           setProfile(prev => prev ? { ...prev, followers_count: (prev.followers_count || 0) + 1 } : null);
+        }
+        // Send real-time follow action
+        if (isConnected) {
+          sendFollowAction(id as string, true);
         }
       }
     } catch (error) {
@@ -198,9 +263,13 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       const response = await followsApi.unfollow(id as string);
       if (response.status === 'success') {
         setIsFollowing(false);
-        // Update followers count
+        // Update followers count immediately
         if (profile) {
           setProfile(prev => prev ? { ...prev, followers_count: Math.max(0, (prev.followers_count || 0) - 1) } : null);
+        }
+        // Send real-time unfollow action
+        if (isConnected) {
+          sendFollowAction(id as string, false);
         }
       }
     } catch (error) {
@@ -219,6 +288,13 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     setPostModalVisible(false);
     setSelectedPost(null);
   };
+
+  // Cleanup effect to pause videos when modal closes
+  useEffect(() => {
+    if (!postModalVisible && selectedPost) {
+      setSelectedPost(null);
+    }
+  }, [postModalVisible]);
 
   const handleSharePost = async () => {
     if (!selectedPost) return;
@@ -365,18 +441,50 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
 
           {/* Stats */}
           <View style={styles.statsRow}>
-            <View style={styles.statItem}>
+            <TouchableOpacity 
+              style={styles.statItem}
+              onPress={() => {
+                console.log('Navigating to followers page with posts type');
+                router.push({
+                  pathname: '/followers/[id]' as any,
+                  params: { id: id as string, type: 'posts' }
+                });
+              }}
+            >
               <Text style={[styles.statValue, { color: C.text }]}>{approvedPosts.length}</Text>
               <Text style={[styles.statLabel, { color: C.textSecondary }]}>Posts</Text>
-            </View>
-            <View style={styles.statItem}>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.statItem}
+              onPress={() => {
+                console.log('Navigating to followers page with followers type');
+                router.push({
+                  pathname: '/followers/[id]' as any,
+                  params: { id: id as string, type: 'followers' }
+                });
+              }}
+            >
               <Text style={[styles.statValue, { color: C.text }]}>{profile?.followers_count ?? 0}</Text>
               <Text style={[styles.statLabel, { color: C.textSecondary }]}>Followers</Text>
-            </View>
-            <View style={styles.statItem}>
+              {isConnected && (
+                <View style={styles.realtimeIndicator}>
+                  <Text style={[styles.realtimeText, { color: C.primary }]}>●</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.statItem}
+              onPress={() => {
+                console.log('Navigating to followers page with following type');
+                router.push({
+                  pathname: '/followers/[id]' as any,
+                  params: { id: id as string, type: 'following' }
+                });
+              }}
+            >
               <Text style={[styles.statValue, { color: C.text }]}>{profile?.following_count ?? 0}</Text>
               <Text style={[styles.statLabel, { color: C.textSecondary }]}>Following</Text>
-            </View>
+            </TouchableOpacity>
           </View>
 
           {/* Follow Button */}
@@ -420,25 +528,35 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
               data={approvedPosts}
               renderItem={({ item }) => {
                 const { url: mediaUrl, type: mediaType } = getPostMedia(item);
+                const isVideo = mediaType === 'video';
                 return (
                   <TouchableOpacity 
                     onPress={() => handlePostPress(item)}
                     style={[styles.postCard, { backgroundColor: C.card }]}
                   >
-                    {/* Media Thumbnail */}
+                    {/* Media Preview */}
                     {mediaUrl ? (
-                      <View style={{ position: 'relative' }}>
-                        <Image 
-                          source={{ uri: mediaUrl }} 
-                          style={styles.postImage} 
-                          resizeMode="cover" 
-                        />
-                        {mediaType === 'video' && (
+                      isVideo ? (
+                        <View style={styles.videoThumbnail}>
+                          <Video
+                            source={{ uri: mediaUrl }}
+                            style={styles.postImage}
+                            resizeMode={ResizeMode.COVER}
+                            shouldPlay={true}
+                            isLooping={true}
+                            isMuted={true}
+                            useNativeControls={false}
+                            shouldCorrectPitch={true}
+                            volume={0.0}
+                            posterStyle={{ resizeMode: 'cover' }}
+                          />
                           <View style={styles.playIconOverlay}>
                             <MaterialIcons name="play-circle-outline" size={48} color="#fff" />
                           </View>
-                        )}
-                      </View>
+                        </View>
+                      ) : (
+                        <Image source={{ uri: mediaUrl }} style={styles.postImage} resizeMode="cover" />
+                      )
                     ) : (
                       <Image
                         source={{ uri: 'https://via.placeholder.com/150' }}
@@ -448,7 +566,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                     )}
                     {/* Caption and Category */}
                     <View style={styles.postFooter}>
-                      <Text style={[styles.postCaption, { color: C.text }]} numberOfLines={2}>
+                      <Text style={[styles.postCaption, { color: '#fff' }]} numberOfLines={2}>
                         {item.title || item.description || ''}
                       </Text>
                       <View style={styles.postFooterActions}>
@@ -456,14 +574,14 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                           <Feather 
                             name="heart" 
                             size={16} 
-                            color={(item.likesCount || 0) > 0 ? "#ff2d55" : C.textSecondary} 
+                            color={(item.likesCount || 0) > 0 ? "#ff2d55" : "#999"} 
                             fill={(item.likesCount || 0) > 0 ? "#ff2d55" : "none"}
                           />
-                          <Text style={[styles.postActionText, { color: C.textSecondary }]}>{item.likesCount || 0}</Text>
+                          <Text style={[styles.postActionText, { color: '#999' }]}>{item.likesCount || 0}</Text>
                         </View>
                         <View style={styles.postAction}>
-                          <Feather name="message-circle" size={16} color={C.textSecondary} />
-                          <Text style={[styles.postActionText, { color: C.textSecondary }]}>{item.commentsCount || 0}</Text>
+                          <Feather name="message-circle" size={16} color="#999" />
+                          <Text style={[styles.postActionText, { color: '#999' }]}>{item.commentsCount || 0}</Text>
                         </View>
                       </View>
                       {item.categoryName && (
@@ -495,10 +613,11 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             </TouchableOpacity>
             {selectedPost && (() => {
               const { url: mediaUrl, type: mediaType } = getPostMedia(selectedPost);
+              const isVideo = mediaType === 'video';
               return (
                 <View style={styles.overlayMediaContainer}>
                   {mediaUrl ? (
-                    mediaType === 'video' ? (
+                    isVideo ? (
                       <Video
                         source={{ uri: mediaUrl }}
                         style={styles.overlayMedia}
@@ -625,6 +744,11 @@ const styles = StyleSheet.create({
   },
   statItem: {
     alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    marginHorizontal: 4,
   },
   statValue: {
     fontSize: 18,
@@ -654,7 +778,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   postCard: {
-    backgroundColor: '#fff',
+    backgroundColor: '#1a1a1a',
     borderRadius: 12,
     marginBottom: 16,
     shadowColor: '#000',
@@ -663,6 +787,8 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
     width: '48%',
+    borderWidth: 1,
+    borderColor: '#333',
   },
   postHeader: {
     flexDirection: 'row',
@@ -782,10 +908,14 @@ const styles = StyleSheet.create({
     width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 20,
   },
   overlayMedia: {
     width: '100%',
-    height: '80%',
+    height: '90%',
+    maxWidth: '95%',
+    maxHeight: '90%',
   },
   overlayActions: {
     position: 'absolute',
@@ -797,5 +927,25 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     borderRadius: 25,
+  },
+  realtimeIndicator: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  realtimeText: {
+    fontSize: 12,
+  },
+  videoThumbnail: {
+    position: 'relative',
+    width: '100%',
+    height: 150,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
   },
 }); 
