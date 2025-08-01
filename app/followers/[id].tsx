@@ -8,8 +8,6 @@ import {
   FlatList,
   ActivityIndicator,
   useColorScheme,
-  SafeAreaView,
-  StatusBar,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
@@ -78,14 +76,18 @@ export default function FollowersScreen() {
     fetchProfile();
   }, [id]);
 
-  // Fetch followers
+  // Fetch followers using web app API structure
   const fetchFollowers = async () => {
     if (!id) return;
     setLoadingFollowers(true);
     try {
       const response = await followsApi.getFollowers(id as string);
       if (response.status === 'success' && response.data) {
-        setFollowers(response.data);
+        // Handle both array and object with followers property
+        const followersData = Array.isArray(response.data) 
+          ? response.data 
+          : response.data.followers || [];
+        setFollowers(followersData);
       }
     } catch (error) {
       console.error('Error fetching followers:', error);
@@ -94,14 +96,18 @@ export default function FollowersScreen() {
     }
   };
 
-  // Fetch following
+  // Fetch following using web app API structure
   const fetchFollowing = async () => {
     if (!id) return;
     setLoadingFollowing(true);
     try {
       const response = await followsApi.getFollowing(id as string);
       if (response.status === 'success' && response.data) {
-        setFollowing(response.data);
+        // Handle both array and object with following property
+        const followingData = Array.isArray(response.data) 
+          ? response.data 
+          : response.data.following || [];
+        setFollowing(followingData);
       }
     } catch (error) {
       console.error('Error fetching following:', error);
@@ -110,13 +116,17 @@ export default function FollowersScreen() {
     }
   };
 
-  // Fetch suggestions
+  // Fetch suggestions using web app API structure
   const fetchSuggestions = async () => {
     setLoadingSuggestions(true);
     try {
       const response = await userApi.getSuggestions();
       if (response.status === 'success' && response.data) {
-        setSuggestions(response.data);
+        // Handle both array and object with suggestions property
+        const suggestionsData = Array.isArray(response.data) 
+          ? response.data 
+          : response.data.suggestions || [];
+        setSuggestions(suggestionsData);
       }
     } catch (error) {
       console.error('Error fetching suggestions:', error);
@@ -258,9 +268,7 @@ export default function FollowersScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: C.background }]}>
-      <StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
-      
+    <View style={[styles.container, { backgroundColor: C.background }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: C.border }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -340,7 +348,7 @@ export default function FollowersScreen() {
           }}
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

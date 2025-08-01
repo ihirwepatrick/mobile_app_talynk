@@ -319,7 +319,7 @@ export const userApi = {
       return {
         status: 'error',
         message: 'Failed to fetch user suggestions',
-        data: [],
+        data: { suggestions: [] },
       };
     }
   },
@@ -411,26 +411,26 @@ export const followsApi = {
   // Get followers
   getFollowers: async (userId: string) => {
     try {
-      const response = await apiClient.get(`/api/follows/followers/${userId}`);
+      const response = await apiClient.get(`/api/users/${userId}/followers`);
       return response.data;
     } catch (error: any) {
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch followers',
-        data: [],
+        data: { followers: [] },
       };
     }
   },
   // Get following
   getFollowing: async (userId: string) => {
     try {
-      const response = await apiClient.get(`/api/follows/following/${userId}`);
+      const response = await apiClient.get(`/api/users/${userId}/following`);
       return response.data;
     } catch (error: any) {
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch following',
-        data: [],
+        data: { following: [] },
       };
     }
   },
