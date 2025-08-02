@@ -129,9 +129,26 @@ export default function ProfileScreen() {
       setLoadingProfile(true);
       setProfileError(null);
       try {
-        const response = await userApi.getUserById(userId);
+        const response = await userApi.getProfile();
         if (response.status === 'success' && response.data) {
-          setProfile(response.data);
+          // Handle the nested user structure from API
+          const userData = (response.data as any).user || response.data;
+          setProfile({
+            ...userData,
+            // Map API fields to expected fields
+            name: userData.username, // Use username as name since there's no name field
+            followers_count: userData.follower_count,
+            following_count: userData.subscribers, // Using subscribers as following count
+            posts_count: userData.posts_count,
+            // Keep original fields
+            phone1: userData.phone1,
+            phone2: userData.phone2,
+            email: userData.email,
+            profile_picture: userData.profile_picture,
+            bio: userData.bio || '',
+            username: userData.username,
+            id: userData.id,
+          });
         } else {
           setProfileError(response.message || 'Failed to fetch user profile');
         }
@@ -191,9 +208,25 @@ export default function ProfileScreen() {
     // Re-fetch profile and posts
     const fetchProfile = async () => {
       try {
-        const response = await userApi.getUserById(userId);
+        const response = await userApi.getProfile();
         if (response.status === 'success' && response.data) {
-          setProfile(response.data);
+          const userData = (response.data as any).user || response.data;
+          setProfile({
+            ...userData,
+            // Map API fields to expected fields
+            name: userData.username,
+            followers_count: userData.follower_count,
+            following_count: userData.subscribers,
+            posts_count: userData.posts_count,
+            // Keep original fields
+            phone1: userData.phone1,
+            phone2: userData.phone2,
+            email: userData.email,
+            profile_picture: userData.profile_picture,
+            bio: userData.bio || '',
+            username: userData.username,
+            id: userData.id,
+          });
         }
       } catch (err: any) {
         console.error('Error refreshing profile:', err);
@@ -366,6 +399,29 @@ export default function ProfileScreen() {
           <Text style={styles.profileNameLarge}>{profile?.name || profile?.username || 'User'}</Text>
           <Text style={styles.profileUsernameLarge}>@{profile?.username}</Text>
           {profile?.bio ? <Text style={styles.profileBioLarge}>{profile.bio}</Text> : null}
+          
+          {/* Contact Information */}
+          <View style={styles.contactInfo}>
+            {profile?.email && (
+              <View style={styles.contactItem}>
+                <MaterialIcons name="email" size={16} color={C.textSecondary} />
+                <Text style={[styles.contactText, { color: C.text }]}>{profile.email}</Text>
+              </View>
+            )}
+            {profile?.phone1 && (
+              <View style={styles.contactItem}>
+                <MaterialIcons name="phone" size={16} color={C.textSecondary} />
+                <Text style={[styles.contactText, { color: C.text }]}>{profile.phone1}</Text>
+              </View>
+            )}
+            {profile?.phone2 && (
+              <View style={styles.contactItem}>
+                <MaterialIcons name="phone" size={16} color={C.textSecondary} />
+                <Text style={[styles.contactText, { color: C.text }]}>{profile.phone2}</Text>
+              </View>
+            )}
+          </View>
+          
           <View style={styles.statsRow}>
             <TouchableOpacity 
               style={styles.statItem}
@@ -377,7 +433,7 @@ export default function ProfileScreen() {
                 });
               }}
             >
-              <Text style={styles.statValue}>{profile?.postsCount ?? 0}</Text>
+              <Text style={styles.statValue}>{profile?.posts_count ?? 0}</Text>
               <Text style={styles.statLabel}>Posts</Text>
             </TouchableOpacity>
             <TouchableOpacity 
@@ -390,7 +446,7 @@ export default function ProfileScreen() {
                 });
               }}
             >
-              <Text style={styles.statValue}>{profile?.followersCount ?? 0}</Text>
+              <Text style={styles.statValue}>{profile?.followers_count ?? 0}</Text>
               <Text style={styles.statLabel}>Followers</Text>
             </TouchableOpacity>
             <TouchableOpacity 
@@ -403,7 +459,7 @@ export default function ProfileScreen() {
                 });
               }}
             >
-              <Text style={styles.statValue}>{profile?.followingCount ?? 0}</Text>
+              <Text style={styles.statValue}>{profile?.following_count ?? 0}</Text>
               <Text style={styles.statLabel}>Following</Text>
             </TouchableOpacity>
           </View>
@@ -1171,5 +1227,18 @@ const styles = StyleSheet.create({
     elevation: 8,
     zIndex: 100,
     minWidth: 180,
+  },
+  contactInfo: {
+    marginTop: 10,
+    width: '100%',
+  },
+  contactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  contactText: {
+    marginLeft: 6,
+    fontSize: 14,
   },
 }); 

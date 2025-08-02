@@ -57,18 +57,18 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   }, [user, isVisible]);
 
   const handleSave = async () => {
-    if (!formData.phone1.trim()) {
-      Alert.alert('Error', 'Primary phone number is required');
-      return;
-    }
-
     setLoading(true);
     try {
-      // Prepare update data
-      const updateData = {
-        phone1: formData.phone1,
-        phone2: formData.phone2,
-      };
+      // Prepare update data - only include fields that have values
+      const updateData: any = {};
+      
+      if (formData.phone1.trim()) {
+        updateData.phone1 = formData.phone1.trim();
+      }
+      
+      if (formData.phone2.trim()) {
+        updateData.phone2 = formData.phone2.trim();
+      }
 
       console.log('Sending profile update with data:', updateData);
 
@@ -175,12 +175,12 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
             <View style={styles.formSection}>
               {/* Primary Phone */}
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Primary Phone *</Text>
+                <Text style={styles.label}>Primary Phone (Optional)</Text>
                 <TextInput
                   style={styles.input}
                   value={formData.phone1}
                   onChangeText={(value) => setFormData(prev => ({ ...prev, phone1: value }))}
-                  placeholder="Enter primary phone number"
+                  placeholder="Enter primary phone number (optional)"
                   placeholderTextColor="#666"
                   keyboardType="phone-pad"
                 />
@@ -188,7 +188,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
               {/* Secondary Phone */}
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Secondary Phone</Text>
+                <Text style={styles.label}>Secondary Phone (Optional)</Text>
                 <TextInput
                   style={styles.input}
                   value={formData.phone2}

@@ -47,10 +47,10 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
     <Feather name="home" size={26} />, // Feed
     <Feather name="users" size={26} />, // Explore
     <Feather name="plus" size={32} color={blue} />, // Upload
-    <Feather name="search" size={26} />, // Search
+    <Feather name="bell" size={26} />, // Notifications
     <Feather name="user" size={26} />, // Profile
   ];
-  const labels = ['Home', 'Explore', 'Upload video', 'Search', 'My account'];
+  const labels = ['Home', 'Explore', 'Upload video', 'Notifications', 'My account'];
 
   return (
     <View style={{
