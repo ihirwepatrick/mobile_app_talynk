@@ -277,42 +277,6 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
 
   return (
     <View style={styles.postContainer}>
-      {/* User Info Header */}
-      <View style={styles.postHeader}>
-        <TouchableOpacity 
-          style={styles.postUserInfo}
-          onPress={() => {
-            if (item.user?.id) {
-              router.push({
-                pathname: '/user/[id]',
-                params: { id: item.user.id }
-              });
-            }
-          }}
-        >
-          <Image 
-            source={{ uri: item.user?.profile_picture || 'https://via.placeholder.com/32' }} 
-            style={styles.postUserAvatar} 
-          />
-          <View style={styles.postUserText}>
-            <Text style={styles.postUsername}>@{item.user?.username || 'unknown'}</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={styles.postTime}>{timeAgo(item.createdAt || '')}</Text>
-              <RealtimeIndicator />
-            </View>
-          </View>
-        </TouchableOpacity>
-        <View style={styles.postHeaderActions}>
-          {user && user.id !== item.user?.id && (
-            <TouchableOpacity style={styles.followButtonSmall}>
-              <Text style={styles.followButtonTextSmall}>Follow</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity style={styles.postMenuButton}>
-            <Feather name="more-horizontal" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </View>
 
       <View style={styles.mediaContainer}>
         {isVideo ? (
@@ -321,7 +285,7 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
             <Image
               source={{ uri: mediaUrl }}
               style={styles.image}
-              resizeMode="contain"
+              resizeMode="cover"
               onError={() => setImageError(true)}
             />
           ) : (
@@ -330,7 +294,7 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
                 ref={videoRef}
                 source={{ uri: mediaUrl }}
                 style={styles.video}
-                resizeMode={ResizeMode.CONTAIN}
+                resizeMode={ResizeMode.COVER}
                 shouldPlay={isActive}
                 isLooping
                 isMuted={localMuted}
@@ -352,12 +316,23 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
           <Image
             source={{ uri: imageError ? 'https://via.placeholder.com/300x500' : mediaUrl }}
             style={styles.image}
-            resizeMode="contain"
+            resizeMode="cover"
             onError={() => setImageError(true)}
           />
         )}
-        {/* Right Side Actions */}
-        <View style={[styles.rightActions, { bottom: 320 + insets.bottom }]}>
+        {/* Right Side Actions (avatar + buttons) */}
+        <View style={[styles.rightActions, { bottom: 180 + insets.bottom }]}>
+          {/* User Avatar */}
+          <TouchableOpacity onPress={() => {
+            if (item.user?.id) {
+              router.push({ pathname: '/user/[id]', params: { id: item.user.id } });
+            }
+          }}>
+            <Image 
+              source={{ uri: item.user?.profile_picture || 'https://via.placeholder.com/48' }} 
+              style={{ width: 54, height: 54, borderRadius: 27, borderWidth: 2, borderColor: '#fff', marginBottom: 18 }} 
+            />
+          </TouchableOpacity>
           {/* Like Button */}
           <TouchableOpacity style={styles.actionButton} onPress={handleLike} disabled={isLiking}>
             <Animated.View style={{ transform: [{ scale: likeScale }] }}>
@@ -385,10 +360,6 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
           <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
             <Feather name="share-2" size={32} color="#fff" style={{ marginBottom: 5 }} />
           </TouchableOpacity>
-          {/* Download Button */}
-          <TouchableOpacity style={styles.actionButton}>
-            <Feather name="download" size={32} color="#fff" style={{ marginBottom: 5 }} />
-          </TouchableOpacity>
           {/* Comment Button */}
           <TouchableOpacity style={styles.actionButton} onPress={() => onComment(item.id)}>
             <View style={styles.actionIconContainer}>
@@ -401,9 +372,13 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
             </View>
             <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
           </TouchableOpacity>
+          {/* More (Report) */}
+          <TouchableOpacity style={styles.actionButton}>
+            <Feather name="more-vertical" size={28} color="#fff" />
+          </TouchableOpacity>
         </View>
         {/* Bottom Info Overlay */}
-        <View style={[styles.bottomOverlay, { paddingBottom: 200 + insets.bottom }]}>
+        <View style={[styles.bottomOverlay, { paddingBottom: 120 + insets.bottom }]}>
           <View style={styles.gradient} />
           <View style={styles.bottomInfoRow}>
             <View style={styles.bottomContent}>
@@ -424,14 +399,11 @@ const PostItem: React.FC<PostItemProps & { isActive: boolean }> = ({
                   </View>
                 </View>
               )}
+              {/* Username and meta above caption */}
+              <Text style={styles.usernameMeta} numberOfLines={1}>
+                @{item.user?.username || 'unknown'}  •  {(typeof item.category === 'string' ? item.category : item.category?.name) || 'Following'}  •  {timeAgo(item.createdAt || '')}
+              </Text>
               <Text style={styles.caption} numberOfLines={3}>{item.description || item.title || ''}</Text>
-              {item.category && (
-                <View style={styles.categoryTag}>
-                  <Text style={styles.categoryText}>
-                    {typeof item.category === 'string' ? item.category : item.category.name}
-                  </Text>
-                </View>
-              )}
             </View>
           </View>
         </View>
@@ -689,7 +661,7 @@ export default function FeedScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <MuteContext.Provider value={{ isMuted, setIsMuted }}>
         <FlatList
           ref={flatListRef}
@@ -859,6 +831,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 4,
+  },
+  usernameMeta: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 6,
   },
   emptyContainer: {
     flex: 1,

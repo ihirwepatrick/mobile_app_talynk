@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 
 import Colors from '@/constants/Colors';
-import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+ 
 import AuthGuard from '@/components/AuthGuard';
 import RealtimeProvider from '@/lib/realtime-context';
 
@@ -55,18 +55,11 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
   return (
     <View style={{
       flexDirection: 'row',
-      backgroundColor: bg,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      height: 76 + insets.bottom, // slightly less height
-      paddingBottom: insets.bottom + 2, // less padding
+      backgroundColor: 'transparent',
+      height: 56 + insets.bottom,
+      paddingBottom: insets.bottom,
       alignItems: 'flex-end',
       justifyContent: 'space-between',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: -2 },
-      shadowOpacity: 0.2,
-      shadowRadius: 8,
-      elevation: 8,
     }}>
       {state.routes.map((route: any, idx: number) => {
         const isFocused = state.index === idx;
@@ -75,31 +68,28 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
         };
         // Center button
         if (idx === 2) {
+          const iconColor = isFocused ? (isDark ? '#fff' : '#18181b') : inactive;
           return (
-            <View key={route.key} style={{ flex: 1, alignItems: 'center', top: -36 }}>
-              <TouchableOpacity
-                onPress={onPress}
-                activeOpacity={0.8}
-                style={{
-                  width: 64,
-                  height: 64,
-                  borderRadius: 32,
-                  backgroundColor: '#fff',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.18,
-                  shadowRadius: 8,
-                  elevation: 8,
-                  borderWidth: 4,
-                  borderColor: bg,
-                }}
-              >
-                <Feather name="plus" size={32} color={blue} />
-              </TouchableOpacity>
-              <Text style={{ color: isDark ? '#fff' : '#222', fontSize: 13, marginTop: 2, fontWeight: '500' }}>{labels[idx]}</Text>
-            </View>
+            <TouchableOpacity
+              key={route.key}
+              onPress={onPress}
+              activeOpacity={0.8}
+              style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: 60 }}
+            >
+              <View style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: isFocused ? (isDark ? '#232326' : '#f0f0f0') : 'transparent',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 2,
+                overflow: 'hidden',
+              }}>
+                <Feather name="plus" size={26} color={iconColor} />
+              </View>
+              <Text style={{ color: isFocused ? (isDark ? '#fff' : '#18181b') : inactive, fontSize: 13, fontWeight: isFocused ? 'bold' : '500' }}>{labels[idx]}</Text>
+            </TouchableOpacity>
           );
         }
         // Other tabs
@@ -145,7 +135,7 @@ export default function TabLayout() {
       <Tabs
             tabBar={props => <CustomTabBar {...props} />}
         screenOptions={{
-          headerShown: useClientOnlyValue(false, true),
+          headerShown: false,
             }}
           >
         <Tabs.Screen
