@@ -8,7 +8,8 @@ import 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 
 import { AuthProvider } from '@/lib/auth-context';
-import { CacheProvider } from '@/lib/cache-context';
+import { CacheProvider } from '@/lib/cache-context'
+import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -24,6 +25,7 @@ export const unstable_settings = {
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  useFrameworkReady();
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     ...FontAwesome.font,
