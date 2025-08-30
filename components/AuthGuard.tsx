@@ -1,35 +1,24 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 
 interface AuthGuardProps {
   children: React.ReactNode;
+  requireAuth?: boolean;
 }
 
-export default function AuthGuard({ children }: AuthGuardProps) {
-  const { isAuthenticated, loading } = useAuth();
-
-  useEffect(() => {
-    if (!loading) {
-      if (!isAuthenticated) {
-        router.replace('/auth/login');
-      }
-    }
-  }, [isAuthenticated, loading]);
+export default function AuthGuard({ children, requireAuth = false }: AuthGuardProps) {
+  const { loading } = useAuth();
 
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#60a5fa" />
       </View>
     );
   }
 
-  if (!isAuthenticated) {
-    return null;
-  }
-
+  // Always render children - auth will be handled per action
   return <>{children}</>;
 }
 
@@ -38,6 +27,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#000000',
   },
-}); 
+});

@@ -8,500 +8,283 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
-  useColorScheme,
   Dimensions,
   ScrollView,
   RefreshControl,
 } from 'react-native';
 import { router } from 'expo-router';
-import { postsApi, userApi } from '@/lib/api';
+import { postsApi, userApi, followsApi } from '@/lib/api';
 import { Post, User } from '@/types';
-import { followsApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { Feather } from '@expo/vector-icons';
+import { useCache } from '@/lib/cache-context';
+import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { Video, ResizeMode } from 'expo-av';
-import { useRealtime } from '@/lib/realtime-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
-const COLORS = {
-  dark: {
-    background: '#000000',
-    card: '#1a1a1a',
-    border: '#2a2a2a',
-    text: '#ffffff',
-    textSecondary: '#8e8e93',
-    textTertiary: '#666666',
-    primary: '#0095f6',
-    inputBg: '#1a1a1a',
-    inputBorder: '#2a2a2a',
-    inputText: '#ffffff',
-    buttonBg: '#0095f6',
-    buttonText: '#ffffff',
-    spinner: '#0095f6',
-    likeColor: '#ed4956',
-  },
-  light: {
-    background: '#ffffff',
-    card: '#ffffff',
-    border: '#dbdbdb',
-    text: '#262626',
-    textSecondary: '#8e8e93',
-    textTertiary: '#666666',
-    primary: '#0095f6',
-    inputBg: '#ffffff',
-    inputBorder: '#dbdbdb',
-    inputText: '#262626',
-    buttonBg: '#0095f6',
-    buttonText: '#ffffff',
-    spinner: '#0095f6',
-    likeColor: '#ed4956',
-  },
-};
-
-// Categories for filtering
 const CATEGORIES = [
-  'All',
-  'Entertainment',
-  'Sports',
-  'Technology',
-  'Fashion',
-  'Food',
-  'Travel',
-  'Music',
-  'Comedy',
-  'Education',
+  'All', 'Entertainment', 'Sports', 'Technology', 'Music', 'Comedy', 
+  'Education', 'Fashion', 'Food', 'Travel', 'Art', 'Dance'
+];
+
+const EXPLORE_TABS = [
+  { key: 'trending', label: 'Trending' },
+  { key: 'discover', label: 'Discover' },
+  { key: 'live', label: 'Live' },
 ];
 
 export default function ExploreScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [trendingPosts, setTrendingPosts] = useState<Post[]>([]);
-  const [loadingTrending, setLoadingTrending] = useState(true);
-  const [recentSearches, setRecentSearches] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'trending' | 'foryou' | 'following'>('trending');
+  const [activeTab, setActiveTab] = useState('trending');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [following, setFollowing] = useState<{ [userId: string]: boolean }>({});
-  const [followingSuggestions, setFollowingSuggestions] = useState<User[]>([]);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [suggestions, setSuggestions] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
-  const { sendFollowAction } = useRealtime();
-  const colorScheme = useColorScheme() || 'dark';
-  const C = COLORS[colorScheme];
+  const { followedUsers, updateFollowedUsers } = useCache();
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    fetchTrendingPosts();
-    fetchFollowingSuggestions();
-  }, []);
+    loadContent();
+  }, [activeTab, selectedCategory]);
 
-  const fetchTrendingPosts = async () => {
-    setLoadingTrending(true);
+  const loadContent = async () => {
+    setLoading(true);
     try {
-      const response = await postsApi.getAll(1, 20);
-      if (response.status === 'success') {
-        setTrendingPosts(response.data);
-        // Preload follow status for each user
-        const followStatus: { [userId: string]: boolean } = {};
-        await Promise.all(response.data.map(async (post) => {
-          if (post.user?.id && user?.id !== post.user.id) {
-            try {
-            const res = await followsApi.checkFollowing(post.user.id);
-            followStatus[post.user.id] = !!res.data?.isFollowing;
-            } catch {
-              followStatus[post.user.id] = false;
-            }
-          }
-        }));
-        setFollowing(followStatus);
+      const [postsResponse, suggestionsResponse] = await Promise.all([
+        postsApi.getAll(1, 30),
+        userApi.getSuggestions()
+      ]);
+
+      if (postsResponse.status === 'success') {
+        let filteredPosts = postsResponse.data;
+        
+        // Filter by category
+        if (selectedCategory !== 'All') {
+          filteredPosts = filteredPosts.filter(post => {
+            const postCategory = typeof post.category === 'string' ? post.category : post.category?.name;
+            return postCategory === selectedCategory;
+          });
+        }
+        
+        setPosts(filteredPosts);
+      }
+
+      if (suggestionsResponse.status === 'success') {
+        setSuggestions(suggestionsResponse.data?.suggestions || []);
       }
     } catch (error) {
-      console.error('Error fetching trending posts:', error);
+      console.error('Error loading explore content:', error);
     } finally {
-      setLoadingTrending(false);
+      setLoading(false);
       setRefreshing(false);
-    }
-  };
-
-  const fetchFollowingSuggestions = async () => {
-    setLoadingSuggestions(true);
-    try {
-      // For now, we'll use trending posts to get user suggestions
-      const response = await postsApi.getAll(1, 20);
-      if (response.status === 'success' && response.data) {
-        const uniqueUsers = response.data
-          .map(post => post.user)
-          .filter((user, index, arr) => user && arr.findIndex(u => u?.id === user.id) === index)
-          .slice(0, 10);
-        setFollowingSuggestions(uniqueUsers as User[]);
-      }
-    } catch (error) {
-      console.error('Error fetching suggestions:', error);
-    } finally {
-      setLoadingSuggestions(false);
     }
   };
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchTrendingPosts();
-    fetchFollowingSuggestions();
-  };
-
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    setLoading(true);
-    setRecentSearches((prev) => [searchQuery, ...prev.filter((s) => s !== searchQuery)].slice(0, 5));
-    try {
-      const response = await postsApi.search(searchQuery);
-      if (response.status === 'success') {
-        setSearchResults(response.data);
-      }
-    } catch (error) {
-      console.error('Error searching:', error);
-    } finally {
-      setLoading(false);
-    }
+    loadContent();
   };
 
   const handleFollow = async (userId: string) => {
-    if (!user) return;
-    setFollowing((prev) => ({ ...prev, [userId]: true }));
+    if (!user) {
+      router.push('/auth/login');
+      return;
+    }
+
+    updateFollowedUsers(userId, true);
     try {
-    await followsApi.follow(userId);
-      sendFollowAction(userId, true);
+      await followsApi.follow(userId);
     } catch (error) {
-      setFollowing((prev) => ({ ...prev, [userId]: false }));
+      updateFollowedUsers(userId, false);
     }
   };
 
-  const handleUnfollow = async (userId: string) => {
-    if (!user) return;
-    setFollowing((prev) => ({ ...prev, [userId]: false }));
-    try {
-    await followsApi.unfollow(userId);
-      sendFollowAction(userId, false);
-    } catch (error) {
-      setFollowing((prev) => ({ ...prev, [userId]: true }));
-    }
-  };
-
-  const navigateToUserProfile = (userId: string) => {
-    router.push({
-      pathname: '/user/[id]',
-      params: { id: userId }
-    });
-  };
-
-  const navigateToPost = (postId: string) => {
-    router.push(`/post/${postId}` as any);
-  };
-
-  const getFilteredPosts = () => {
-    const posts = activeTab === 'trending' ? trendingPosts : searchResults;
-    if (selectedCategory === 'All') return posts;
-    return posts.filter(post => {
-      const postCategory = typeof post.category === 'string' ? post.category : post.category?.name;
-      return postCategory === selectedCategory;
-    });
-  };
-
-  const isVideoPost = (post: Post) => {
-    const mediaUrl = post.video_url || post.videoUrl || '';
-    return mediaUrl.includes('.mp4') || mediaUrl.includes('.webm') || mediaUrl.includes('.mov');
+  const handleSearch = () => {
+    router.push('/search');
   };
 
   const renderPost = ({ item }: { item: Post }) => {
-    const isFollowing = following[item.user?.id || ''] || false;
-    const showFollow = user && item.user?.id && user.id !== item.user.id;
-    const mediaUrl = item.image || item.imageUrl || item.video_url || item.videoUrl || '';
-    const isVideo = isVideoPost(item);
+    const mediaUrl = item.video_url || item.image || '';
+    const isVideo = !!item.video_url;
 
     return (
       <TouchableOpacity 
-        style={[styles.postCard, { backgroundColor: C.card, borderColor: C.border }]}
-        onPress={() => navigateToPost(item.id)}
-      > 
-        {/* Media Preview */}
-        <View style={styles.mediaContainer}>
-          {isVideo ? (
-            <View style={styles.videoThumbnail}>
-              <Video
-                source={{ uri: mediaUrl }}
-                style={styles.postImage}
-                resizeMode={ResizeMode.COVER}
-                shouldPlay={true}
-                isLooping={true}
-                isMuted={true}
-                useNativeControls={false}
-                shouldCorrectPitch={true}
-                volume={0.0}
-                posterStyle={{ resizeMode: 'cover' }}
-              />
-              <View style={styles.playIconOverlay}>
-                <Feather name="play" size={20} color="#fff" />
-              </View>
-            </View>
-          ) : (
-          <Image
-              source={{ uri: mediaUrl }}
-            style={styles.postImage}
-            resizeMode="cover"
+        style={styles.postCard}
+        onPress={() => router.push({
+          pathname: '/post/[id]',
+          params: { id: item.id }
+        })}
+      >
+        {isVideo ? (
+          <Video
+            source={{ uri: mediaUrl }}
+            style={styles.postMedia}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay={false}
+            isMuted={true}
+            useNativeControls={false}
+            posterStyle={{ resizeMode: 'cover' }}
           />
+        ) : (
+          <Image source={{ uri: mediaUrl }} style={styles.postMedia} />
         )}
-                     {item.category && (
-             <View style={[styles.categoryTag, { backgroundColor: C.primary }]}>
-               <Text style={[styles.categoryText, { color: C.buttonText }]}>
-                 {typeof item.category === 'string' ? item.category : item.category.name}
-               </Text>
-             </View>
-           )}
-        </View>
-
-        {/* User Info */}
-        <TouchableOpacity 
-          style={styles.postInfoRow}
-          onPress={() => navigateToUserProfile(item.user?.id || '')}
-        >
-          <Image
-            source={{ uri: item.user?.avatar || item.user?.profile_picture || 'https://via.placeholder.com/32' }}
-            style={styles.avatar}
-          />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.username, { color: C.text }]} numberOfLines={1}>
-              {item.user?.name || item.user?.username || 'Unknown User'}
-            </Text>
-            <Text style={[styles.timestamp, { color: C.textSecondary }]} numberOfLines={1}>
-              {new Date(item.createdAt || '').toLocaleDateString()}
-            </Text>
+        
+        <View style={styles.postOverlay}>
+          <View style={styles.postStats}>
+            <Feather name="heart" size={14} color="#fff" />
+            <Text style={styles.postStatText}>{item.likes || 0}</Text>
           </View>
-          {showFollow && (
-            <TouchableOpacity 
-              style={[
-                styles.followButtonSmall,
-                { backgroundColor: isFollowing ? 'transparent' : C.primary }
-              ]} 
-              onPress={() => isFollowing ? handleUnfollow(item.user!.id) : handleFollow(item.user!.id)}
-            >
-              <Text style={[
-                styles.followButtonTextSmall,
-                { color: isFollowing ? C.textSecondary : C.buttonText }
-              ]}>
-                {isFollowing ? 'Following' : 'Follow'}
-              </Text>
-              </TouchableOpacity>
+          
+          {isVideo && (
+            <View style={styles.playIcon}>
+              <Feather name="play" size={16} color="#fff" />
+            </View>
           )}
-        </TouchableOpacity>
-
-        {/* Post Content */}
-        <Text style={[styles.title, { color: C.text }]} numberOfLines={2}>
-          {item.title || item.caption || item.description || ''}
-        </Text>
-
-        {/* Post Stats */}
-        <View style={styles.postActionsRow}>
-          <Text style={[styles.actionText, { color: C.textSecondary }]}>
-            ❤️ {item.likes || item.likesCount || 0}
-          </Text>
-          <Text style={[styles.actionText, { color: C.textSecondary }]}>
-            💬 {item.comments_count || item.commentsCount || 0}
-          </Text>
         </View>
       </TouchableOpacity>
     );
   };
 
-  const renderFollowingSuggestion = ({ item }: { item: User }) => {
-    const isFollowing = following[item.id] || false;
-    const showFollow = user && item.id && user.id !== item.id;
-
-    return (
-      <View style={[styles.suggestionCard, { backgroundColor: C.card, borderColor: C.border }]}>
+  const renderSuggestion = ({ item }: { item: User }) => (
+    <View style={styles.suggestionCard}>
+      <TouchableOpacity 
+        onPress={() => router.push({
+          pathname: '/user/[id]',
+          params: { id: item.id }
+        })}
+      >
+        <Image
+          source={{ uri: item.profile_picture || 'https://via.placeholder.com/80' }}
+          style={styles.suggestionAvatar}
+        />
+        <Text style={styles.suggestionName}>{item.name || item.username}</Text>
+        <Text style={styles.suggestionUsername}>@{item.username}</Text>
+      </TouchableOpacity>
+      
+      {user && user.id !== item.id && (
         <TouchableOpacity 
-          style={styles.suggestionUserInfo}
-          onPress={() => navigateToUserProfile(item.id)}
+          style={[
+            styles.suggestionFollowButton,
+            followedUsers.has(item.id) && styles.suggestionFollowingButton
+          ]}
+          onPress={() => handleFollow(item.id)}
         >
-          <Image
-            source={{ uri: item.avatar || item.profile_picture || 'https://via.placeholder.com/48' }}
-            style={styles.suggestionAvatar}
-          />
-          <View style={styles.suggestionText}>
-            <Text style={[styles.suggestionName, { color: C.text }]} numberOfLines={1}>
-              {item.name || item.username}
-            </Text>
-            <Text style={[styles.suggestionUsername, { color: C.textSecondary }]} numberOfLines={1}>
-              @{item.username}
-            </Text>
-          </View>
+          <Text style={[
+            styles.suggestionFollowText,
+            followedUsers.has(item.id) && styles.suggestionFollowingText
+          ]}>
+            {followedUsers.has(item.id) ? 'Following' : 'Follow'}
+          </Text>
         </TouchableOpacity>
-        {showFollow && (
-          <TouchableOpacity 
-            style={[
-              styles.followButtonSmall,
-              { backgroundColor: isFollowing ? 'transparent' : C.primary }
-            ]} 
-            onPress={() => isFollowing ? handleUnfollow(item.id) : handleFollow(item.id)}
-          >
-            <Text style={[
-              styles.followButtonTextSmall,
-              { color: isFollowing ? C.textSecondary : C.buttonText }
-            ]}>
-              {isFollowing ? 'Following' : 'Follow'}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  };
+      )}
+    </View>
+  );
 
   return (
-    <View style={[styles.container, { backgroundColor: C.background }]}> 
-      {/* Content Switcher Tabs */}
-      <View style={styles.tabsRow}>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'trending' && styles.tabActive]} 
-          onPress={() => setActiveTab('trending')}
-        >
-          <Text style={[styles.tabText, activeTab === 'trending' && styles.tabTextActive]}>Trending</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'foryou' && styles.tabActive]} 
-          onPress={() => setActiveTab('foryou')}
-        >
-          <Text style={[styles.tabText, activeTab === 'foryou' && styles.tabTextActive]}>For You</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'following' && styles.tabActive]} 
-          onPress={() => setActiveTab('following')}
-        >
-          <Text style={[styles.tabText, activeTab === 'following' && styles.tabTextActive]}>Following</Text>
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <Text style={styles.headerTitle}>Explore</Text>
+        <TouchableOpacity onPress={handleSearch} style={styles.searchButton}>
+          <Feather name="search" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
 
-      {/* Search Bar */}
-      <View style={[styles.searchContainer, { backgroundColor: C.card, borderBottomColor: C.border }]}> 
-        <View style={[styles.searchInputContainer, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]}>
-          <Feather name="search" size={20} color={C.textSecondary} style={styles.searchIcon} />
-        <TextInput
-            style={[styles.searchInput, { color: C.inputText }]}
-          placeholder="Search posts, people, or topics..."
-          placeholderTextColor={C.textSecondary}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          onSubmitEditing={handleSearch}
-          returnKeyType="search"
-        />
-        </View>
-        <TouchableOpacity 
-          style={[styles.searchButton, { backgroundColor: C.buttonBg }]} 
-          onPress={handleSearch}
-        >
-          <Text style={[styles.searchButtonText, { color: C.buttonText }]}>Search</Text>
-        </TouchableOpacity>
+      {/* Tabs */}
+      <View style={styles.tabsContainer}>
+        {EXPLORE_TABS.map((tab) => (
+          <TouchableOpacity
+            key={tab.key}
+            style={[
+              styles.tab,
+              activeTab === tab.key && styles.tabActive
+            ]}
+            onPress={() => setActiveTab(tab.key)}
+          >
+            <Text style={[
+              styles.tabText,
+              activeTab === tab.key && styles.tabTextActive
+            ]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      {/* Category Filter */}
+      {/* Categories */}
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}
-        style={styles.categoryContainer}
-        contentContainerStyle={styles.categoryContent}
+        style={styles.categoriesContainer}
+        contentContainerStyle={styles.categoriesContent}
       >
         {CATEGORIES.map((category) => (
           <TouchableOpacity
             key={category}
             style={[
               styles.categoryPill,
-              selectedCategory === category && { backgroundColor: C.primary }
+              selectedCategory === category && styles.categoryPillActive
             ]}
             onPress={() => setSelectedCategory(category)}
           >
             <Text style={[
               styles.categoryPillText,
-              { color: selectedCategory === category ? C.buttonText : C.text }
+              selectedCategory === category && styles.categoryPillTextActive
             ]}>
               {category}
             </Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
-      {/* Divider */}
-      <View style={styles.divider} />
 
-      {/* Recent Searches */}
-      {recentSearches.length > 0 && (
-        <View style={styles.recentSearchesBox}>
-          <Text style={[styles.recentSearchesTitle, { color: C.textSecondary }]}>Recent Searches</Text>
-          <View style={styles.recentSearchesRow}>
-            {recentSearches.map((s) => (
-              <View key={s} style={[styles.recentSearchPill, { backgroundColor: C.card }]}>
-                <Text style={{ color: C.text }}>{s}</Text>
-                <TouchableOpacity onPress={() => setRecentSearches(recentSearches.filter((x) => x !== s))}>
-                  <Text style={{ color: C.textSecondary, marginLeft: 4 }}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-            <TouchableOpacity onPress={() => setRecentSearches([])}>
-              <Text style={{ color: C.textSecondary, marginLeft: 8 }}>Clear All</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* Following Suggestions */}
-      {activeTab === 'following' && (
-        <View style={styles.suggestionsContainer}>
-          <Text style={[styles.sectionTitle, { color: C.text, fontSize: 15, marginBottom: 6 }]}>Suggested for You</Text>
-          {loadingSuggestions ? (
-            <ActivityIndicator size="small" color={C.spinner} />
-          ) : (
+      <ScrollView 
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#60a5fa" />
+        }
+      >
+        {/* Suggestions */}
+        {suggestions.length > 0 && (
+          <View style={styles.suggestionsSection}>
+            <Text style={styles.sectionTitle}>Suggested for you</Text>
             <FlatList
-              data={followingSuggestions}
-              renderItem={renderFollowingSuggestion}
+              data={suggestions.slice(0, 10)}
+              renderItem={renderSuggestion}
               keyExtractor={(item) => item.id}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.suggestionsList}
             />
+          </View>
+        )}
+
+        {/* Posts Grid */}
+        <View style={styles.postsSection}>
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#60a5fa" />
+            </View>
+          ) : (
+            <FlatList
+              data={posts}
+              renderItem={renderPost}
+              keyExtractor={(item) => item.id}
+              numColumns={3}
+              scrollEnabled={false}
+              contentContainerStyle={styles.postsGrid}
+              ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                  <Feather name="video" size={48} color="#666" />
+                  <Text style={styles.emptyText}>No posts found</Text>
+                  <Text style={styles.emptySubtext}>Try a different category</Text>
+                </View>
+              }
+            />
           )}
         </View>
-      )}
-
-      {/* Grid of Posts */}
-      {loadingTrending ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={C.spinner} />
-        </View>
-      ) : (
-        <FlatList
-          data={getFilteredPosts()}
-          renderItem={renderPost}
-          keyExtractor={(item) => item.id}
-          numColumns={2}
-          columnWrapperStyle={styles.gridRow}
-          contentContainerStyle={{ padding: 10, paddingTop: 0 }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={C.primary}
-              colors={[C.primary]}
-            />
-          }
-          ListEmptyComponent={
-            <View style={[styles.emptyContainer, { flex: 0.5, marginTop: 0 }]}>
-              <Text style={[styles.emptyText, { color: C.text }]}>No posts found</Text>
-              <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>
-                {selectedCategory !== 'All' ? `Try a different category` : 'Try searching for something else'}
-              </Text>
-            </View>
-          }
-        />
-      )}
+      </ScrollView>
     </View>
   );
 }
@@ -509,286 +292,191 @@ export default function ExploreScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#000000',
   },
-  tabsRow: {
+  header: {
     flexDirection: 'row',
-    backgroundColor: '#1a1a1a',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  searchButton: {
+    padding: 8,
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginBottom: 12,
   },
   tab: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 12,
     borderRadius: 20,
+    marginHorizontal: 2,
+    backgroundColor: '#1a1a1a',
   },
   tabActive: {
-    backgroundColor: '#0095f6',
+    backgroundColor: '#60a5fa',
   },
   tabText: {
+    color: '#666',
     fontSize: 14,
-    fontWeight: '600',
-    color: '#8e8e93',
+    fontWeight: '500',
   },
   tabTextActive: {
-    color: '#ffffff',
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    padding: 15,
-    borderBottomWidth: 1,
-    alignItems: 'center',
-  },
-  searchInputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    marginRight: 10,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: 10,
-    fontSize: 16,
-  },
-  searchButton: {
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    justifyContent: 'center',
-  },
-  searchButtonText: {
-    fontSize: 14,
+    color: '#000',
     fontWeight: '600',
   },
-  categoryContainer: {
-    paddingVertical: 10,
-    marginBottom: 10,
-    marginTop: 10,
+  categoriesContainer: {
+    marginBottom: 16,
   },
-  categoryContent: {
-    paddingHorizontal: 15,
+  categoriesContent: {
+    paddingHorizontal: 16,
   },
   categoryPill: {
-    height: 32,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginRight: 8,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#1a1a1a',
+  },
+  categoryPillActive: {
+    backgroundColor: '#60a5fa',
   },
   categoryPillText: {
-    fontSize: 13,
+    color: '#666',
+    fontSize: 12,
     fontWeight: '500',
-    textAlign: 'center',
-    lineHeight: 32,
   },
-  recentSearchesBox: {
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
-  },
-  recentSearchesTitle: {
-    fontSize: 16,
+  categoryPillTextActive: {
+    color: '#000',
     fontWeight: '600',
-    marginBottom: 10,
   },
-  recentSearchesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-  },
-  recentSearchPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginRight: 8,
-    marginBottom: 4,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#232326',
-    marginVertical: 10,
-    marginHorizontal: 0,
-    marginBottom: 10,
-  },
-  suggestionsContainer: {
-    paddingTop: 0,
-    paddingBottom: 0,
-    paddingLeft: 10,
-    paddingRight: 0,
-    marginBottom: 0,
-    borderBottomWidth: 0,
+  suggestionsSection: {
+    marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    paddingHorizontal: 16,
     marginBottom: 12,
   },
   suggestionsList: {
-    paddingRight: 10,
-    paddingVertical: 0,
-    paddingTop: 0,
-    paddingBottom: 0,
+    paddingHorizontal: 16,
   },
   suggestionCard: {
-    flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
-    borderRadius: 10,
-    marginRight: 8,
-    minWidth: 140,
-    maxWidth: 180,
-    borderWidth: 1,
-    borderColor: '#232326',
-    backgroundColor: '#18181b',
-  },
-  suggestionUserInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 16,
+    marginRight: 12,
+    width: 120,
   },
   suggestionAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 8,
-  },
-  suggestionText: {
-    flex: 1,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginBottom: 8,
   },
   suggestionName: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 1,
-  },
-  suggestionUsername: {
-    fontSize: 11,
-    color: '#8e8e93',
-  },
-  postCard: {
-    width: (screenWidth - 30) / 2,
-    marginBottom: 15,
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: 1,
-  },
-  mediaContainer: {
-    position: 'relative',
-    width: '100%',
-    height: 150,
-  },
-  postImage: {
-    width: '100%',
-    height: '100%',
-  },
-  videoThumbnail: {
-    position: 'relative',
-    width: '100%',
-    height: '100%',
-  },
-  playIconOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  categoryTag: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    height: 32,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  categoryText: {
-    fontSize: 13,
+    color: '#fff',
+    fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
-    lineHeight: 32,
-  },
-  postInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    paddingBottom: 8,
-  },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 8,
-  },
-  username: {
-    fontSize: 12,
-    fontWeight: '600',
     marginBottom: 2,
   },
-  timestamp: {
+  suggestionUsername: {
+    color: '#666',
     fontSize: 10,
+    textAlign: 'center',
+    marginBottom: 8,
   },
-  followButtonSmall: {
-    paddingHorizontal: 8,
+  suggestionFollowButton: {
+    backgroundColor: '#60a5fa',
+    paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#0095f6',
   },
-  followButtonTextSmall: {
+  suggestionFollowingButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#666',
+  },
+  suggestionFollowText: {
+    color: '#000',
     fontSize: 10,
     fontWeight: '600',
   },
-  title: {
-    fontSize: 12,
-    lineHeight: 16,
-    paddingHorizontal: 12,
-    paddingBottom: 8,
+  suggestionFollowingText: {
+    color: '#666',
   },
-  postActionsRow: {
+  postsSection: {
+    flex: 1,
+  },
+  postsGrid: {
+    padding: 2,
+  },
+  postCard: {
+    width: (screenWidth - 6) / 3,
+    height: (screenWidth - 6) / 3 * 1.5,
+    margin: 1,
+    position: 'relative',
+  },
+  postMedia: {
+    width: '100%',
+    height: '100%',
+  },
+  postOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 8,
     flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-  },
-  actionText: {
-    fontSize: 10,
-    marginRight: 12,
-  },
-  gridRow: {
     justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  postStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  postStatText: {
+    color: '#fff',
+    fontSize: 12,
+    marginLeft: 4,
+  },
+  playIcon: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 12,
+    padding: 4,
   },
   loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
+    paddingVertical: 40,
     alignItems: 'center',
   },
   emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
+    paddingVertical: 60,
+    width: screenWidth,
   },
   emptyText: {
-    fontSize: 18,
-    fontWeight: '600',
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 16,
     marginBottom: 8,
   },
   emptySubtext: {
+    color: '#666',
     fontSize: 14,
     textAlign: 'center',
   },
-}); 
+});

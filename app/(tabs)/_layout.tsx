@@ -1,131 +1,77 @@
 import React from 'react';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, Tabs } from 'expo-router';
-import { Pressable, View, Text, TouchableOpacity, useColorScheme } from 'react-native';
-import { useAuth } from '@/lib/auth-context';
+import { Tabs } from 'expo-router';
+import { View, TouchableOpacity, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 
-import Colors from '@/constants/Colors';
-import { useClientOnlyValue } from '@/components/useClientOnlyValue';
-import AuthGuard from '@/components/AuthGuard';
 import RealtimeProvider from '@/lib/realtime-context';
 
-// You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
-function TabBarIcon(props: {
-  name: React.ComponentProps<typeof FontAwesome>['name'];
-  color: string;
-}) {
-  return <FontAwesome size={28} style={{ marginBottom: -3 }} {...props} />;
-}
-
-const COLORS = {
-  light: {
-    tabBarBg: '#fff',
-    tabBarBorder: '#e5e7eb',
-    tabBarActive: '#007AFF',
-    tabBarInactive: '#666',
-  },
-  dark: {
-    tabBarBg: '#18181b',
-    tabBarBorder: '#27272a',
-    tabBarActive: '#60a5fa',
-    tabBarInactive: '#a1a1aa',
-  },
-};
-
 function CustomTabBar({ state, descriptors, navigation }: { state: any; descriptors: any; navigation: any }) {
-  const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
-  const isDark = colorScheme === 'dark';
-  const bg = isDark ? '#18181b' : '#fff';
-  const active = isDark ? '#fff' : '#18181b';
-  const inactive = isDark ? '#a1a1aa' : '#666';
-  const blue = '#007AFF';
+  const bg = '#000000';
+  const active = '#ffffff';
+  const inactive = '#666666';
+  const primary = '#60a5fa';
 
   const icons = [
     <Feather name="home" size={26} />, // Feed
-    <Feather name="users" size={26} />, // Explore
-    <Feather name="plus" size={32} color={blue} />, // Upload
+    <Feather name="search" size={26} />, // Explore
+    <Feather name="plus" size={32} color={primary} />, // Create
     <Feather name="bell" size={26} />, // Notifications
     <Feather name="user" size={26} />, // Profile
   ];
-  const labels = ['Home', 'Explore', 'Upload video', 'Notifications', 'My account'];
 
   return (
     <View style={{
       flexDirection: 'row',
       backgroundColor: bg,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      height: 76 + insets.bottom, // slightly less height
-      paddingBottom: insets.bottom + 2, // less padding
-      alignItems: 'flex-end',
+      height: 60 + insets.bottom,
+      paddingBottom: insets.bottom,
+      alignItems: 'center',
       justifyContent: 'space-between',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: -2 },
-      shadowOpacity: 0.2,
-      shadowRadius: 8,
-      elevation: 8,
+      borderTopWidth: 0.5,
+      borderTopColor: '#333333',
     }}>
       {state.routes.map((route: any, idx: number) => {
         const isFocused = state.index === idx;
         const onPress = () => {
           if (!isFocused) navigation.navigate(route.name);
         };
-        // Center button
+
+        // Center create button
         if (idx === 2) {
           return (
-            <View key={route.key} style={{ flex: 1, alignItems: 'center', top: -36 }}>
+            <View key={route.key} style={{ flex: 1, alignItems: 'center' }}>
               <TouchableOpacity
                 onPress={onPress}
                 activeOpacity={0.8}
                 style={{
-                  width: 64,
-                  height: 64,
-                  borderRadius: 32,
-                  backgroundColor: '#fff',
+                  width: 48,
+                  height: 32,
+                  borderRadius: 8,
+                  backgroundColor: primary,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.18,
-                  shadowRadius: 8,
-                  elevation: 8,
-                  borderWidth: 4,
-                  borderColor: bg,
                 }}
               >
-                <Feather name="plus" size={32} color={blue} />
+                <Feather name="plus" size={20} color="#000000" />
               </TouchableOpacity>
-              <Text style={{ color: isDark ? '#fff' : '#222', fontSize: 13, marginTop: 2, fontWeight: '500' }}>{labels[idx]}</Text>
             </View>
           );
         }
+
         // Other tabs
         return (
           <TouchableOpacity
             key={route.key}
             onPress={onPress}
             activeOpacity={0.8}
-            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: 60 }}
+            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: 50 }}
           >
-            <View style={{
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: isFocused ? (isDark ? '#232326' : '#f0f0f0') : 'transparent',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: 2,
-              overflow: 'hidden',
-            }}>
-              {React.cloneElement(icons[idx], { color: isFocused ? (isDark ? '#fff' : '#18181b') : inactive })}
-            </View>
-            <Text style={{ color: isFocused ? (isDark ? '#fff' : '#18181b') : inactive, fontSize: 13, fontWeight: isFocused ? 'bold' : '500' }}>{labels[idx]}</Text>
-            {isFocused && idx !== 2 && (
-              <View style={{ height: 4, width: 32, backgroundColor: blue, borderRadius: 2, marginTop: 2 }} />
-            )}
+            {React.cloneElement(icons[idx], { 
+              color: isFocused ? active : inactive,
+              size: isFocused ? 28 : 24
+            })}
           </TouchableOpacity>
         );
       })}
@@ -134,58 +80,22 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
 }
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-  const C = COLORS[colorScheme ?? 'light'];
-  const { logout } = useAuth();
-
   return (
-    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
+    <View style={{ flex: 1, backgroundColor: '#000000' }}>
       <RealtimeProvider>
-    <AuthGuard>
-      <Tabs
-            tabBar={props => <CustomTabBar {...props} />}
-        screenOptions={{
-          headerShown: useClientOnlyValue(false, true),
-            }}
-          >
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: 'Feed',
-            tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,
+        <Tabs
+          tabBar={props => <CustomTabBar {...props} />}
+          screenOptions={{
+            headerShown: false,
           }}
-        />
-        <Tabs.Screen
-          name="explore"
-          options={{
-            title: 'Explore',
-            tabBarIcon: ({ color }) => <TabBarIcon name="search" color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="create"
-          options={{
-            title: 'Create',
-            tabBarIcon: ({ color }) => <TabBarIcon name="plus" color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="notifications"
-          options={{
-            title: 'Notifications',
-            tabBarIcon: ({ color }) => <TabBarIcon name="bell" color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="profile"
-          options={{
-            title: 'Profile',
-            tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />,
-          }}
-        />
-      </Tabs>
-    </AuthGuard>
-    </RealtimeProvider>
+        >
+          <Tabs.Screen name="index" />
+          <Tabs.Screen name="explore" />
+          <Tabs.Screen name="create" />
+          <Tabs.Screen name="notifications" />
+          <Tabs.Screen name="profile" />
+        </Tabs>
+      </RealtimeProvider>
     </View>
   );
 }

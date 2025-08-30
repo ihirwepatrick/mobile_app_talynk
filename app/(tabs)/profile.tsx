@@ -7,1238 +7,747 @@ import {
   Image,
   ScrollView,
   ActivityIndicator,
-  useColorScheme,
   FlatList,
   Modal,
   Share,
   Alert,
-  TextInput,
   RefreshControl,
 } from 'react-native';
-import { useRoute, useNavigation } from '@react-navigation/native';
 import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
-import { userApi, followsApi, postsApi } from '@/lib/api';
-import { User, Post } from '@/types';
+import { userApi, postsApi } from '@/lib/api';
+import { Post } from '@/types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { Video, ResizeMode } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
-import { useRealtime } from '@/lib/realtime-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditProfileModal } from '@/components/EditProfileModal';
 
-const COLORS = {
-  light: {
-    background: '#f5f5f5',
-    card: '#fff',
-    border: '#e5e7eb',
-    text: '#222',
-    textSecondary: '#666',
-    primary: '#007AFF',
-    button: '#007AFF',
-    buttonText: '#fff',
-    logoutButton: '#ef4444',
-    logoutButtonText: '#fff',
-  },
-  dark: {
-    background: '#18181b',
-    card: '#232326',
-    border: '#27272a',
-    text: '#f3f4f6',
-    textSecondary: '#a1a1aa',
-    primary: '#60a5fa',
-    button: '#60a5fa',
-    buttonText: '#18181b',
-    logoutButton: '#b91c1c',
-    logoutButtonText: '#fff',
-  },
-};
-
-// --- Tabs ---
-const TABS = [
-  { key: 'approved', label: 'Approved' },
-  { key: 'pending', label: 'Pending' },
-  { key: 'rejected', label: 'Rejected' },
+const PROFILE_TABS = [
+  { key: 'approved', label: 'Approved', icon: 'check-circle' },
+  { key: 'pending', label: 'Pending', icon: 'schedule' },
+  { key: 'rejected', label: 'Rejected', icon: 'cancel' },
+  { key: 'reported', label: 'Reported', icon: 'report' },
 ];
 
 export default function ProfileScreen() {
-  const { user: currentUser, logout } = useAuth();
-  const route = useRoute();
-  const navigation = useNavigation();
-  const userId = (route.params && (route.params as any).userId) || currentUser?.id;
+  const { user, logout } = useAuth();
   const [profile, setProfile] = useState<any>(null);
-  const [loadingProfile, setLoadingProfile] = useState(true);
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('approved');
   const [posts, setPosts] = useState<Post[]>([]);
-  const [followers, setFollowers] = useState<any[]>([]);
-  const [following, setFollowing] = useState<any[]>([]);
-  const [loadingTab, setLoadingTab] = useState(false);
-  const [tabError, setTabError] = useState<string | null>(null);
-  const [isFollowing, setIsFollowing] = useState(false);
-  const [followLoading, setFollowLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('approved');
+  const [refreshing, setRefreshing] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editProfileModalVisible, setEditProfileModalVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [postModalVisible, setPostModalVisible] = useState(false);
-  const [postActionsVisible, setPostActionsVisible] = useState(false);
-  const [deletingPost, setDeletingPost] = useState(false);
-  const [comments, setComments] = useState<any[]>([]);
-  const [commentsLoading, setCommentsLoading] = useState(false);
-  const [newComment, setNewComment] = useState('');
-  const [refreshing, setRefreshing] = useState(false);
-  const { sendFollowAction } = useRealtime();
-  const colorScheme = useColorScheme() || 'light';
-  const C = COLORS[colorScheme];
-
-  // --- Menu state ---
   const [menuVisible, setMenuVisible] = useState(false);
+  const [totalLikes, setTotalLikes] = useState(0);
+  const insets = useSafeAreaInsets();
 
-  // Add local getFollowers/getFollowing wrappers
-  const getFollowers = async (userId: string) => {
+  useEffect(() => {
+    if (!user) {
+      router.replace('/auth/login');
+      return;
+    }
+    loadProfile();
+    loadPosts();
+  }, [user, activeTab]);
+
+  const loadProfile = async () => {
     try {
-      const response = await userApi.getUserById(userId);
-      const d = response.data as any;
-      if (d && Array.isArray(d.followers)) {
-        return d.followers;
-      } else if (d && typeof d === 'object' && d.data && Array.isArray(d.data.followers)) {
-        return d.data.followers;
+      const response = await userApi.getProfile();
+      if (response.status === 'success' && response.data) {
+        const userData = (response.data as any).user || response.data;
+        setProfile({
+          ...userData,
+          name: userData.username,
+          followers_count: userData.follower_count || 0,
+          following_count: userData.subscribers || 0,
+          posts_count: userData.posts_count || 0,
+          phone1: userData.phone1,
+          phone2: userData.phone2,
+          email: userData.email,
+          profile_picture: userData.profile_picture,
+          bio: userData.bio || '',
+          username: userData.username,
+          id: userData.id,
+        });
       }
-      return [];
-    } catch {
-      return [];
+    } catch (error) {
+      console.error('Error loading profile:', error);
+    } finally {
+      setLoading(false);
     }
   };
-  const getFollowing = async (userId: string) => {
+
+  const loadPosts = async () => {
     try {
-      const response = await userApi.getUserById(userId);
-      const d = response.data as any;
-      if (d && Array.isArray(d.following)) {
-        return d.following;
-      } else if (d && typeof d === 'object' && d.data && Array.isArray(d.data.following)) {
-        return d.data.following;
-      }
-      return [];
-    } catch {
-      return [];
-    }
-  };
-
-  // Fetch profile info
-  useEffect(() => {
-    const fetchProfile = async () => {
-      setLoadingProfile(true);
-      setProfileError(null);
-      try {
-        const response = await userApi.getProfile();
-        if (response.status === 'success' && response.data) {
-          // Handle the nested user structure from API
-          const userData = (response.data as any).user || response.data;
-          setProfile({
-            ...userData,
-            // Map API fields to expected fields
-            name: userData.username, // Use username as name since there's no name field
-            followers_count: userData.follower_count,
-            following_count: userData.subscribers, // Using subscribers as following count
-            posts_count: userData.posts_count,
-            // Keep original fields
-            phone1: userData.phone1,
-            phone2: userData.phone2,
-            email: userData.email,
-            profile_picture: userData.profile_picture,
-            bio: userData.bio || '',
-            username: userData.username,
-            id: userData.id,
-          });
-        } else {
-          setProfileError(response.message || 'Failed to fetch user profile');
-        }
-      } catch (err: any) {
-        setProfileError(err.message || 'Failed to fetch user profile');
-      } finally {
-        setLoadingProfile(false);
-      }
-    };
-    fetchProfile();
-  }, [userId]);
-
-  // Fetch follow state
-  useEffect(() => {
-    const checkFollow = async () => {
-      if (!currentUser || currentUser.id === userId) return;
-      try {
-        const response = await followsApi.checkFollowing(userId);
-        setIsFollowing(!!response.data?.isFollowing);
-      } catch {
-        setIsFollowing(false);
-      }
-    };
-    checkFollow();
-  }, [userId, currentUser]);
-
-  // Fetch tab data
-  useEffect(() => {
-    setLoadingTab(true);
-    setTabError(null);
-    userApi.getOwnPosts().then((response: any) => {
-      if (response.status === 'success' && response.data && Array.isArray(response.data.posts)) {
+      const response = await userApi.getOwnPosts();
+      if (response.status === 'success' && response.data?.posts) {
         let filteredPosts = response.data.posts;
-        if (activeTab === 'pending') {
-          filteredPosts = filteredPosts.filter((p: any) => (p.status || 'approved') === 'pending');
-        } else if (activeTab === 'rejected') {
-          filteredPosts = filteredPosts.filter((p: any) => (p.status || 'approved') === 'rejected');
-        } else {
-          filteredPosts = filteredPosts.filter((p: any) => (p.status || 'approved') === 'approved');
+        
+        // Filter by tab
+        switch (activeTab) {
+          case 'pending':
+            filteredPosts = filteredPosts.filter((p: any) => p.status === 'pending');
+            break;
+          case 'rejected':
+            filteredPosts = filteredPosts.filter((p: any) => p.status === 'rejected');
+            break;
+          case 'reported':
+            filteredPosts = filteredPosts.filter((p: any) => p.status === 'reported');
+            break;
+          default:
+            filteredPosts = filteredPosts.filter((p: any) => (p.status || 'approved') === 'approved');
         }
+        
         setPosts(filteredPosts);
-      } else {
-        setTabError(response.message || 'Failed to fetch posts');
+        
+        // Calculate total likes
+        const likes = filteredPosts.reduce((sum: number, post: any) => sum + (post.likes || 0), 0);
+        setTotalLikes(likes);
       }
-      setLoadingTab(false);
-      setRefreshing(false);
-    }).catch((err: any) => {
-      setTabError(err.message || 'Failed to fetch posts');
-      setLoadingTab(false);
-      setRefreshing(false);
-    });
-  }, [activeTab]);
+    } catch (error) {
+      console.error('Error loading posts:', error);
+    }
+  };
 
-  // Refresh function
   const onRefresh = () => {
     setRefreshing(true);
-    // Re-fetch profile and posts
-    const fetchProfile = async () => {
-      try {
-        const response = await userApi.getProfile();
-        if (response.status === 'success' && response.data) {
-          const userData = (response.data as any).user || response.data;
-          setProfile({
-            ...userData,
-            // Map API fields to expected fields
-            name: userData.username,
-            followers_count: userData.follower_count,
-            following_count: userData.subscribers,
-            posts_count: userData.posts_count,
-            // Keep original fields
-            phone1: userData.phone1,
-            phone2: userData.phone2,
-            email: userData.email,
-            profile_picture: userData.profile_picture,
-            bio: userData.bio || '',
-            username: userData.username,
-            id: userData.id,
-          });
-        }
-      } catch (err: any) {
-        console.error('Error refreshing profile:', err);
-      }
-    };
-    fetchProfile();
+    Promise.all([loadProfile(), loadPosts()]).finally(() => setRefreshing(false));
   };
 
-  // Fetch comments when overlay opens for approved post
-  useEffect(() => {
-    if (postModalVisible && selectedPost && selectedPost.status === 'approved') {
-      setCommentsLoading(true);
-      postsApi.getComments(selectedPost.id)
-        .then((res: any) => {
-          setComments(res.data?.comments || []);
-        })
-        .catch(() => setComments([]))
-        .finally(() => setCommentsLoading(false));
-    } else {
-      setComments([]);
-    }
-  }, [postModalVisible, selectedPost]);
-  // Add comment handler
-  const handleAddComment = async () => {
-    if (!selectedPost || !newComment.trim()) return;
-    setCommentsLoading(true);
-    try {
-      const res = await postsApi.addComment(selectedPost.id, newComment);
-      if (res.status === 'success' && res.data?.comment?.length) {
-        setComments([res.data.comment[0], ...comments]);
-        setNewComment('');
-      }
-    } finally {
-      setCommentsLoading(false);
-    }
-  };
-
-  const handleFollow = async () => {
-    setFollowLoading(true);
-    try {
-      const response = await followsApi.follow(userId);
-      if (response.status === 'success') {
-        setIsFollowing(true);
-        sendFollowAction(userId, true);
-      }
-    } finally {
-      setFollowLoading(false);
-    }
-  };
-  const handleUnfollow = async () => {
-    setFollowLoading(true);
-    try {
-      const response = await followsApi.unfollow(userId);
-      if (response.status === 'success') {
-        setIsFollowing(false);
-        sendFollowAction(userId, false);
-      }
-    } finally {
-      setFollowLoading(false);
-    }
-  };
-
-  // --- Post click handler ---
-  const handlePostPress = (post: Post) => {
-    setSelectedPost(post);
-    setPostModalVisible(true);
-  };
-  const handlePostLongPress = (post: Post) => {
-    setSelectedPost(post);
-    setPostActionsVisible(true);
-  };
-  const handleClosePostModal = () => {
-    setPostModalVisible(false);
-    setSelectedPost(null);
-  };
-  const handleCloseActionsMenu = () => {
-    setPostActionsVisible(false);
-    setSelectedPost(null);
-  };
-
-  const handleEditProfile = () => {
-    setEditProfileModalVisible(true);
-  };
-
-  const handleProfileUpdated = (updatedUser: any) => {
-    setProfile(updatedUser);
-    setEditProfileModalVisible(false);
-  };
-  const handleDeletePost = async () => {
-    if (!selectedPost) return;
-    Alert.alert('Delete Post', 'Are you sure you want to delete this post?', [
+  const handleDeletePost = async (postId: string) => {
+    Alert.alert(
+      'Delete Post',
+      'Are you sure you want to delete this post?',
+      [
         { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        setDeletingPost(true);
-        try {
-          await postsApi.deletePost(selectedPost.id);
-          setPosts(posts.filter(p => p.id !== selectedPost.id));
-          setPostModalVisible(false);
-          setPostActionsVisible(false);
-        } catch (e) {
-          Alert.alert('Error', 'Failed to delete post.');
-        } finally {
-          setDeletingPost(false);
-        }
-      }}
-    ]);
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await postsApi.deletePost(postId);
+            setPosts(prev => prev.filter(p => p.id !== postId));
+            setPostModalVisible(false);
+          } catch (error) {
+            Alert.alert('Error', 'Failed to delete post');
+          }
+        }}
+      ]
+    );
   };
-  const handleSharePost = async () => {
-    if (!selectedPost) return;
-    const mediaArr = (selectedPost as any).media;
-    try {
-      await Share.share({
-        message: selectedPost.caption || '',
-        url: (Array.isArray(mediaArr) && mediaArr[0]?.url) || selectedPost.image || selectedPost.video_url || '',
-        title: 'Check out this post!'
-      });
-    } catch {}
+
+  const renderPost = ({ item }: { item: Post }) => {
+    const mediaUrl = item.video_url || item.image || '';
+    const isVideo = !!item.video_url;
+
+    return (
+      <TouchableOpacity 
+        style={styles.postItem}
+        onPress={() => {
+          setSelectedPost(item);
+          setPostModalVisible(true);
+        }}
+      >
+        {isVideo ? (
+          <Video
+            source={{ uri: mediaUrl }}
+            style={styles.postMedia}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay={false}
+            isMuted={true}
+            useNativeControls={false}
+            posterStyle={{ resizeMode: 'cover' }}
+          />
+        ) : (
+          <Image source={{ uri: mediaUrl }} style={styles.postMedia} />
+        )}
+        
+        <View style={styles.postOverlay}>
+          <View style={styles.postStats}>
+            <Feather name="heart" size={14} color="#fff" />
+            <Text style={styles.postStatText}>{item.likes || 0}</Text>
+          </View>
+          
+          {/* Status indicator */}
+          <View style={[
+            styles.statusIndicator,
+            { backgroundColor: getStatusColor(item.status || 'approved') }
+          ]}>
+            <MaterialIcons 
+              name={getStatusIcon(item.status || 'approved')} 
+              size={12} 
+              color="#fff" 
+            />
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
   };
-  const handleDownloadPost = async () => {
-    if (!selectedPost) return;
-    const mediaArr = (selectedPost as any).media;
-    const url = (Array.isArray(mediaArr) && mediaArr[0]?.url) || selectedPost.image || selectedPost.video_url || '';
-    if (!url) return Alert.alert('No media to download');
-    try {
-      // For demo: just alert. In real app, use FileSystem.downloadAsync and MediaLibrary.
-      Alert.alert('Download', 'Download started (implement actual download logic here).');
-    } catch (e) {
-      Alert.alert('Error', 'Failed to download media.');
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'approved': return '#10b981';
+      case 'pending': return '#f59e0b';
+      case 'rejected': return '#ef4444';
+      case 'reported': return '#8b5cf6';
+      default: return '#10b981';
     }
   };
 
-  // Helper to get media URL/type
-  function getPostMedia(post: Post) {
-    if (Array.isArray((post as any).media) && (post as any).media[0]) {
-      return { url: (post as any).media[0].url, type: (post as any).media[0].type };
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'approved': return 'check-circle';
+      case 'pending': return 'schedule';
+      case 'rejected': return 'cancel';
+      case 'reported': return 'report';
+      default: return 'check-circle';
     }
-    if (post.image) return { url: post.image, type: 'image' };
-    if (post.imageUrl) return { url: post.imageUrl, type: 'image' };
-    if (post.video_url) return { url: post.video_url, type: 'video' };
-    if (post.videoUrl) return { url: post.videoUrl, type: 'video' };
-    return { url: '', type: '' };
-  }
-  // Helper to get category as string
-  function getCategoryString(category: string | object) {
-    if (!category) return '';
-    if (typeof category === 'string') return category;
-    if (typeof category === 'object' && (category as any).name) return (category as any).name;
-    return '';
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#60a5fa" />
+      </View>
+    );
   }
 
-  if (loadingProfile) {
-    return <View style={styles.loadingContainer}><ActivityIndicator size="large" color={C.primary} /></View>;
-  }
-  if (profileError || !profile) {
-    return <View style={styles.loadingContainer}><Text style={{ color: 'red', textAlign: 'center' }}>{profileError || 'Failed to load profile'}</Text></View>;
+  if (!user || !profile) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loginPrompt}>
+          <Feather name="user" size={64} color="#666" />
+          <Text style={styles.loginPromptText}>Sign in to view your profile</Text>
+          <TouchableOpacity 
+            style={styles.loginButton}
+            onPress={() => router.push('/auth/login')}
+          >
+            <Text style={styles.loginButtonText}>Sign In</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: C.background }]}> 
-      {/* Profile Header Modernized */}
-      <View style={[styles.header, { backgroundColor: C.card, borderBottomColor: C.border }]}>
-        <View style={{ alignItems: 'center', paddingTop: 24, paddingBottom: 16 }}>
-          <View style={styles.avatarShadowWrapper}>
-            <Image
-              source={profile?.profile_picture ? { uri: profile.profile_picture } : require('../../assets/images/icon.png')}
-              style={styles.avatarLarge}
-              resizeMode="cover"
-            />
-          </View>
-          <Text style={styles.profileNameLarge}>{profile?.name || profile?.username || 'User'}</Text>
-          <Text style={styles.profileUsernameLarge}>@{profile?.username}</Text>
-          {profile?.bio ? <Text style={styles.profileBioLarge}>{profile.bio}</Text> : null}
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <Text style={styles.headerTitle}>Profile</Text>
+        <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.menuButton}>
+          <Feather name="more-horizontal" size={24} color="#fff" />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView 
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#60a5fa" />
+        }
+      >
+        {/* Profile Info */}
+        <View style={styles.profileSection}>
+          <Image
+            source={{ uri: profile.profile_picture || 'https://via.placeholder.com/100' }}
+            style={styles.avatar}
+          />
+          <Text style={styles.username}>@{profile.username}</Text>
+          {profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
           
-          {/* Contact Information */}
-          <View style={styles.contactInfo}>
-            {profile?.email && (
-              <View style={styles.contactItem}>
-                <MaterialIcons name="email" size={16} color={C.textSecondary} />
-                <Text style={[styles.contactText, { color: C.text }]}>{profile.email}</Text>
-              </View>
-            )}
-            {profile?.phone1 && (
-              <View style={styles.contactItem}>
-                <MaterialIcons name="phone" size={16} color={C.textSecondary} />
-                <Text style={[styles.contactText, { color: C.text }]}>{profile.phone1}</Text>
-              </View>
-            )}
-            {profile?.phone2 && (
-              <View style={styles.contactItem}>
-                <MaterialIcons name="phone" size={16} color={C.textSecondary} />
-                <Text style={[styles.contactText, { color: C.text }]}>{profile.phone2}</Text>
-              </View>
-            )}
-          </View>
-          
-          <View style={styles.statsRow}>
-            <TouchableOpacity 
-              style={styles.statItem}
-              onPress={() => {
-                console.log('Navigating to followers page with posts type');
-                router.push({
-                  pathname: '/followers/[id]' as any,
-                  params: { id: userId, type: 'posts' }
-                });
-              }}
-            >
-              <Text style={styles.statValue}>{profile?.posts_count ?? 0}</Text>
+          {/* Stats */}
+          <View style={styles.statsContainer}>
+            <TouchableOpacity style={styles.stat}>
+              <Text style={styles.statValue}>{profile.posts_count || 0}</Text>
               <Text style={styles.statLabel}>Posts</Text>
             </TouchableOpacity>
             <TouchableOpacity 
-              style={styles.statItem}
-              onPress={() => {
-                console.log('Navigating to followers page with followers type');
-                router.push({
-                  pathname: '/followers/[id]' as any,
-                  params: { id: userId, type: 'followers' }
-                });
-              }}
+              style={styles.stat}
+              onPress={() => router.push({
+                pathname: '/followers/[id]',
+                params: { id: profile.id, type: 'followers' }
+              })}
             >
-              <Text style={styles.statValue}>{profile?.followers_count ?? 0}</Text>
+              <Text style={styles.statValue}>{profile.followers_count || 0}</Text>
               <Text style={styles.statLabel}>Followers</Text>
             </TouchableOpacity>
             <TouchableOpacity 
-              style={styles.statItem}
-              onPress={() => {
-                console.log('Navigating to followers page with following type');
-                router.push({
-                  pathname: '/followers/[id]' as any,
-                  params: { id: userId, type: 'following' }
-                });
-              }}
+              style={styles.stat}
+              onPress={() => router.push({
+                pathname: '/followers/[id]',
+                params: { id: profile.id, type: 'following' }
+              })}
             >
-              <Text style={styles.statValue}>{profile?.following_count ?? 0}</Text>
+              <Text style={styles.statValue}>{profile.following_count || 0}</Text>
               <Text style={styles.statLabel}>Following</Text>
             </TouchableOpacity>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>{totalLikes}</Text>
+              <Text style={styles.statLabel}>Likes</Text>
+            </View>
           </View>
-        </View>
-        <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.menuButton}>
-          <MaterialIcons name="more-vert" size={28} color={C.text} />
-        </TouchableOpacity>
-        {/* Dropdown menu */}
-        {menuVisible && (
+
+          {/* Edit Profile Button */}
           <TouchableOpacity 
-            style={styles.menuOverlay} 
-            activeOpacity={1} 
-            onPress={() => setMenuVisible(false)}
+            style={styles.editButton}
+            onPress={() => setEditModalVisible(true)}
           >
-            <View style={[styles.menuDropdown, { backgroundColor: colorScheme === 'dark' ? '#232326' : '#fff', shadowColor: colorScheme === 'dark' ? '#000' : '#000', }] }>
-              {currentUser && currentUser.id === userId && (
-                <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); handleEditProfile(); }}>
-                  <Text style={[styles.menuItemText, { color: colorScheme === 'dark' ? '#fff' : '#222' }]}>Edit Profile</Text>
+            <Text style={styles.editButtonText}>Edit Profile</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Tabs */}
+        <View style={styles.tabsContainer}>
+          {PROFILE_TABS.map((tab) => (
+            <TouchableOpacity
+              key={tab.key}
+              style={[
+                styles.tab,
+                activeTab === tab.key && styles.tabActive
+              ]}
+              onPress={() => setActiveTab(tab.key)}
+            >
+              <MaterialIcons 
+                name={tab.icon as any} 
+                size={16} 
+                color={activeTab === tab.key ? '#60a5fa' : '#666'} 
+              />
+              <Text style={[
+                styles.tabText,
+                activeTab === tab.key && styles.tabTextActive
+              ]}>
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Posts Grid */}
+        <FlatList
+          data={posts}
+          renderItem={renderPost}
+          keyExtractor={(item) => item.id}
+          numColumns={3}
+          scrollEnabled={false}
+          contentContainerStyle={styles.postsGrid}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <MaterialIcons name="video-library" size={48} color="#666" />
+              <Text style={styles.emptyText}>No {activeTab} posts</Text>
+              {activeTab === 'approved' && (
+                <TouchableOpacity 
+                  style={styles.createButton}
+                  onPress={() => router.push('/(tabs)/create')}
+                >
+                  <Text style={styles.createButtonText}>Create your first post</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); router.push('/settings'); }}>
-                <Text style={[styles.menuItemText, { color: colorScheme === 'dark' ? '#fff' : '#222' }]}>Settings</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); logout(); }}>
-                <Text style={[styles.menuItemText, { color: C.logoutButton } ]}>Logout</Text>
-              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-        )}
-      </View>
-      {/* Tabs */}
-      <View style={styles.tabBar}>
-        {TABS.map((tab) => (
-          <TouchableOpacity
-            key={tab.key}
-            style={[styles.tabButton, activeTab === tab.key && styles.tabButtonActive]}
-            onPress={() => setActiveTab(tab.key as 'approved' | 'pending' | 'rejected')}
-          >
-            <Text style={[styles.tabLabel, activeTab === tab.key && styles.tabLabelActive]}>{tab.label}</Text>
-        </TouchableOpacity>
-        ))}
-      </View>
-      {/* Tab Content */}
-      <View style={styles.postsSection}>
-        {loadingTab ? (
-          <View style={styles.loadingContainer}><ActivityIndicator size="small" color={C.primary} /></View>
-        ) : tabError ? (
-          <View style={styles.loadingContainer}><Text style={{ color: 'red', textAlign: 'center' }}>{tabError}</Text></View>
-        ) : (
-          <FlatList
-            data={posts}
-            renderItem={({ item }) => {
-              const { url: mediaUrl, type: mediaType } = getPostMedia(item);
-              return (
-                <TouchableOpacity 
-                  onPress={() => handlePostPress(item)}
-                  onLongPress={() => handlePostLongPress(item)}
-                  style={styles.postCard}
-                >
-                  {/* User Info Header */}
-                  <View style={styles.postHeader}>
-                    <View style={styles.postUserInfo}>
-                      <Image
-                        source={{ uri: profile?.profile_picture || 'https://via.placeholder.com/24' }}
-                        style={styles.postUserAvatar}
-                      />
-                      <Text style={styles.postUsername}>@{profile?.username}</Text>
-                    </View>
-                    {currentUser && currentUser.id !== userId && (
-                      <TouchableOpacity 
-                        onPress={isFollowing ? handleUnfollow : handleFollow}
-                        disabled={followLoading}
-                        style={[
-                          styles.followButton,
-                          { backgroundColor: isFollowing ? 'transparent' : C.primary }
-                        ]}
-                      >
-                        <Text style={[
-                          styles.followButtonText,
-                          { color: isFollowing ? C.textSecondary : C.buttonText }
-                        ]}>
-                          {followLoading ? '...' : (isFollowing ? 'Following' : 'Follow')}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-          </View>
-                  
-                  {/* Media */}
-                  {mediaUrl ? (
-                    mediaType === 'video' ? (
-                      <View>
-                        <Video
-                          source={{ uri: mediaUrl }}
-                    style={styles.postImage}
-                          resizeMode={ResizeMode.COVER}
-                          useNativeControls={false}
-                          shouldPlay={true}
-                          isLooping={true}
-                          isMuted={true}
-                          shouldCorrectPitch={true}
-                          volume={0.0}
-                          posterStyle={{ resizeMode: 'cover' }}
-                        />
-                        <View style={styles.playIconOverlay}>
-                          <MaterialIcons name="play-circle-outline" size={48} color="#fff" />
-                        </View>
-                      </View>
-                    ) : (
-                      <Image source={{ uri: mediaUrl }} style={styles.postImage} resizeMode="cover" />
-                    )
-                  ) : null}
-                  
-                  {/* Caption and Category */}
-                  <View style={styles.postFooter}>
-                    <Text style={styles.postCaption} numberOfLines={2}>
-                      {item.caption || ''}
-                    </Text>
-                    <View style={styles.postFooterActions}>
-                      <View style={styles.postAction}>
-                        <Feather 
-                          name="heart" 
-                          size={16} 
-                          color={(item.likes || 0) > 0 ? "#ff2d55" : "#666"} 
-                          fill={(item.likes || 0) > 0 ? "#ff2d55" : "none"}
-                        />
-                        <Text style={styles.postActionText}>{item.likes || 0}</Text>
-                      </View>
-                      <View style={styles.postAction}>
-                        <Feather name="message-circle" size={16} color="#666" />
-                        <Text style={styles.postActionText}>{item.comments_count || 0}</Text>
-                      </View>
-                    </View>
-                    {item.category && (
-                      <View style={[styles.categoryTag, { backgroundColor: C.primary }]}>
-                        <Text style={[styles.categoryText, { color: C.buttonText }]}>
-                          {getCategoryString(item.category || '')}
-                  </Text>
-                      </View>
-                )}
-                  </View>
-                </TouchableOpacity>
-              );
-            }}
-            keyExtractor={item => item.id}
-            numColumns={2}
-            columnWrapperStyle={{ justifyContent: 'space-between' }}
-            contentContainerStyle={{ paddingBottom: 40 }}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-                tintColor={C.primary}
-                colors={[C.primary]}
-              />
-            }
-          />
-        )}
-      </View>
-      {/* Edit Profile Modal */}
-      <EditProfileModal
-        isVisible={editProfileModalVisible}
-        onClose={() => setEditProfileModalVisible(false)}
-        user={profile}
-        onProfileUpdated={handleProfileUpdated}
-      />
-      {/* Post Modal Overlay */}
-      <Modal visible={postModalVisible} animationType="slide" transparent onRequestClose={handleClosePostModal}>
-        <View style={styles.overlayBackdrop}>
-          <View style={styles.overlayContent}>
-            <TouchableOpacity style={styles.overlayClose} onPress={handleClosePostModal}>
-              <MaterialIcons name="close" size={28} color="#fff" />
+          }
+        />
+      </ScrollView>
+
+      {/* Menu Modal */}
+      <Modal visible={menuVisible} transparent animationType="fade">
+        <TouchableOpacity 
+          style={styles.menuOverlay} 
+          onPress={() => setMenuVisible(false)}
+          activeOpacity={1}
+        >
+          <View style={styles.menuContainer}>
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                setEditModalVisible(true);
+              }}
+            >
+              <Feather name="edit" size={20} color="#fff" />
+              <Text style={styles.menuItemText}>Edit Profile</Text>
             </TouchableOpacity>
-            {selectedPost && (() => {
-              const { url: mediaUrl, type: mediaType } = getPostMedia(selectedPost);
-              const isApproved = selectedPost.status === 'approved';
-              return (
-                <>
-                  {/* Media */}
-                  {mediaUrl ? (
-                    mediaType === 'video' ? (
-                      <Video
-                        source={{ uri: mediaUrl }}
-                        style={styles.overlayMedia}
-                        resizeMode={ResizeMode.CONTAIN}
-                        useNativeControls={true}
-                        shouldPlay={true}
-                        isLooping={true}
-                        shouldCorrectPitch={true}
-                        volume={1.0}
-                      />
-                    ) : (
-                      <Image source={{ uri: mediaUrl }} style={styles.overlayMedia} resizeMode="contain" />
-                    )
-                  ) : null}
-                  {/* Details */}
-                  <Text style={styles.overlayCaption}>{selectedPost.caption || ''}</Text>
-                  <Text style={styles.overlayMeta}>{getCategoryString(selectedPost.category || '')} • {selectedPost.createdAt ? new Date(selectedPost.createdAt).toLocaleString() : ''}</Text>
-                  {/* Comments if approved */}
-                  {isApproved && (
-                    <View style={styles.overlayCommentsSection}>
-                      <Text style={styles.overlayCommentsTitle}>Comments</Text>
-                      {commentsLoading ? (
-                        <Text style={styles.overlayCommentsPlaceholder}>Loading...</Text>
-                      ) : comments.length === 0 ? (
-                        <Text style={styles.overlayCommentsPlaceholder}>No comments yet.</Text>
-                      ) : (
-                        <View style={{ maxHeight: 120 }}>
-                          {comments.map((c, i) => (
-                            <View key={c.id || i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                              <Image source={{ uri: c.User?.avatar || 'https://via.placeholder.com/32' }} style={{ width: 24, height: 24, borderRadius: 12, marginRight: 8 }} />
-                              <View style={{ flex: 1 }}>
-                                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{c.User?.name || c.User?.username || 'unknown'}</Text>
-                                <Text style={{ color: '#aaa', fontSize: 12 }}>{c.comment_text || c.content || ''}</Text>
-                              </View>
-              </View>
-            ))}
-                        </View>
-                      )}
-                      {/* Add comment input */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
-                        <TextInput
-                          style={{ flex: 1, backgroundColor: '#18181b', color: '#fff', borderRadius: 8, padding: 8, fontSize: 13, borderWidth: 1, borderColor: '#333' }}
-                          placeholder="Add a comment..."
-                          placeholderTextColor="#888"
-                          value={newComment}
-                          onChangeText={setNewComment}
-                          editable={!commentsLoading}
-                        />
-                        <TouchableOpacity onPress={handleAddComment} disabled={commentsLoading || !newComment.trim()} style={{ marginLeft: 8 }}>
-                          <MaterialIcons name="send" size={22} color={commentsLoading || !newComment.trim() ? '#888' : '#60a5fa'} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
+            
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                router.push('/settings');
+              }}
+            >
+              <Feather name="settings" size={20} color="#fff" />
+              <Text style={styles.menuItemText}>Settings</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.menuItem, styles.menuItemDanger]}
+              onPress={() => {
+                setMenuVisible(false);
+                Alert.alert(
+                  'Log Out',
+                  'Are you sure you want to log out?',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Log Out', style: 'destructive', onPress: logout }
+                  ]
+                );
+              }}
+            >
+              <Feather name="log-out" size={20} color="#ef4444" />
+              <Text style={[styles.menuItemText, { color: '#ef4444' }]}>Log Out</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Post Detail Modal */}
+      <Modal visible={postModalVisible} transparent animationType="slide">
+        <View style={styles.postModalOverlay}>
+          <View style={styles.postModalContainer}>
+            <TouchableOpacity 
+              style={styles.postModalClose}
+              onPress={() => setPostModalVisible(false)}
+            >
+              <MaterialIcons name="close" size={24} color="#fff" />
+            </TouchableOpacity>
+            
+            {selectedPost && (
+              <>
+                {/* Media */}
+                <View style={styles.postModalMedia}>
+                  {selectedPost.video_url ? (
+                    <Video
+                      source={{ uri: selectedPost.video_url }}
+                      style={styles.modalMedia}
+                      resizeMode={ResizeMode.CONTAIN}
+                      useNativeControls
+                      shouldPlay
+                    />
+                  ) : (
+                    <Image 
+                      source={{ uri: selectedPost.image || '' }} 
+                      style={styles.modalMedia} 
+                    />
                   )}
-                  {/* Action Bar */}
-                  <View style={styles.overlayActions}>
-                    {isApproved ? (
-                      <>
-                        <TouchableOpacity style={styles.overlayActionBtn} onPress={handleDownloadPost}>
-                          <MaterialIcons name="file-download" size={24} color="#fff" />
-                          <Text style={styles.overlayActionText}>Download</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.overlayActionBtn} onPress={handleSharePost}>
-                          <MaterialIcons name="share" size={24} color="#fff" />
-                          <Text style={styles.overlayActionText}>Share</Text>
-                        </TouchableOpacity>
-                      </>
-                    ) : null}
-                    <TouchableOpacity style={styles.overlayActionBtn} onPress={handleDeletePost} disabled={deletingPost}>
-                      <MaterialIcons name="delete" size={24} color={deletingPost ? '#aaa' : '#fff'} />
-                      <Text style={styles.overlayActionText}>{deletingPost ? 'Deleting...' : 'Delete'}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              );
-            })()}
+                </View>
+                
+                {/* Actions */}
+                <View style={styles.postModalActions}>
+                  <TouchableOpacity 
+                    style={styles.modalActionButton}
+                    onPress={() => Share.share({
+                      message: selectedPost.caption || '',
+                      url: selectedPost.video_url || selectedPost.image || '',
+                    })}
+                  >
+                    <Feather name="share" size={20} color="#fff" />
+                    <Text style={styles.modalActionText}>Share</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={[styles.modalActionButton, styles.modalActionButtonDanger]}
+                    onPress={() => handleDeletePost(selectedPost.id)}
+                  >
+                    <Feather name="trash-2" size={20} color="#ef4444" />
+                    <Text style={[styles.modalActionText, { color: '#ef4444' }]}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
-      {/* Post Actions Menu (for long press) */}
-      <Modal visible={postActionsVisible} animationType="fade" transparent onRequestClose={handleCloseActionsMenu}>
-        <TouchableOpacity style={styles.menuOverlayBackdrop} onPress={handleCloseActionsMenu} activeOpacity={1}>
-          <View style={styles.menuDropdownActions}>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { handleDownloadPost(); handleCloseActionsMenu(); }}>
-              <Text style={styles.menuItemText}>Download</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { handleSharePost(); handleCloseActionsMenu(); }}>
-              <Text style={styles.menuItemText}>Share</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { handleDeletePost(); handleCloseActionsMenu(); }}>
-              <Text style={[styles.menuItemText, { color: C.logoutButton }]}>Delete</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-      </View>
+
+      {/* Edit Profile Modal */}
+      <EditProfileModal
+        isVisible={editModalVisible}
+        onClose={() => setEditModalVisible(false)}
+        user={profile}
+        onProfileUpdated={(updatedUser) => {
+          setProfile(updatedUser);
+          setEditModalVisible(false);
+        }}
+      />
+    </View>
   );
+
+  const handleDeletePost = async (postId: string) => {
+    try {
+      await postsApi.deletePost(postId);
+      setPosts(prev => prev.filter(p => p.id !== postId));
+      setPostModalVisible(false);
+      Alert.alert('Success', 'Post deleted successfully');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to delete post');
+    }
+  };
 }
 
-// --- Styles ---
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#000000',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  header: {
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  settingsButton: {
-    borderRadius: 8,
-    padding: 8,
-  },
-  settingsButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  profileHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  avatarContainer: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: '#eee',
-    marginRight: 16,
-    backgroundColor: '#fff',
-    alignItems: 'center',
+  loginPrompt: {
+    flex: 1,
     justifyContent: 'center',
-  },
-  avatar: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    backgroundColor: '#eee',
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  profileUsername: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 5,
-  },
-  profileBio: {
-    fontSize: 14,
-    textAlign: 'left',
-    lineHeight: 20,
-    marginBottom: 10,
-  },
-  profileStats: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  profileStat: {
-    fontSize: 14,
-    color: '#666',
-  },
-  actionsContainer: {
-    flexDirection: 'row',
-    padding: 15,
-    borderBottomWidth: 1,
-  },
-  actionButton: {
-    flex: 1,
-    borderRadius: 8,
-    padding: 12,
-    marginHorizontal: 5,
-    alignItems: 'center',
-  },
-  actionButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  logoutButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  postsSection: {
-    padding: 15,
-    paddingTop: 8,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 15,
-  },
-  postsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  postCard: {
-    width: '48%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 15,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  postHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 8,
-    paddingBottom: 6,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#f0f0f0',
-  },
-  postUserInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  postUserAvatar: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    marginRight: 6,
-  },
-  postUsername: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#262626',
-  },
-  followButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#dbdbdb',
-  },
-  followButtonText: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  postImage: {
-    width: '100%',
-    height: 140,
-  },
-  postCaption: {
-    fontSize: 11,
-    padding: 6,
-    lineHeight: 14,
-  },
-  postFooter: {
-    padding: 6,
-    paddingTop: 4,
-  },
-  categoryTag: {
-    alignSelf: 'flex-end',
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 10,
-    marginTop: 3,
-  },
-  categoryText: {
-    fontSize: 9,
-    fontWeight: '600',
-  },
-  postFooterActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-    marginBottom: 4,
-  },
-  postAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  postActionText: {
-    fontSize: 10,
-    color: '#666',
-    marginLeft: 2,
-  },
-  emptyContainer: {
     alignItems: 'center',
     padding: 40,
   },
-  emptyText: {
+  loginPromptText: {
+    color: '#fff',
     fontSize: 18,
+    marginTop: 16,
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  loginButton: {
+    backgroundColor: '#60a5fa',
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 24,
+  },
+  loginButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  menuButton: {
+    padding: 8,
+  },
+  profileSection: {
+    alignItems: 'center',
+    padding: 24,
+  },
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 16,
+  },
+  username: {
+    color: '#fff',
+    fontSize: 20,
     fontWeight: '600',
     marginBottom: 8,
   },
-  emptySubtext: {
+  bio: {
+    color: '#999',
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 20,
   },
-  createPostButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    padding: 12,
-    paddingHorizontal: 20,
-  },
-  createPostButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  playIconOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-  },
-  playIcon: {
-    fontSize: 32,
-    color: '#fff',
-    textShadowColor: '#000',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 4,
-  },
-  tabBar: {
+  statsContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 10,
-    backgroundColor: '#1a1a1a',
-    borderBottomWidth: 1,
-    borderBottomColor: '#27272a',
+    marginBottom: 20,
   },
-  tabButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 20,
-  },
-  tabButtonActive: {
-    backgroundColor: '#60a5fa',
-    borderRadius: 20,
-  },
-  tabLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-  },
-  tabLabelActive: {
-    color: '#fff',
-  },
-  userRow: {
-    flexDirection: 'row',
+  stat: {
     alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  followerImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 10,
-  },
-  followerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    flex: 1,
-  },
-  followingBadge: {
-    backgroundColor: '#60a5fa',
-    color: '#fff',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-    fontSize: 12,
-    overflow: 'hidden',
-  },
-  menuOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 99,
-  },
-  menuDropdown: {
-    position: 'absolute',
-    top: 50,
-    right: 10,
-    borderRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 8,
-    zIndex: 100,
-    minWidth: 140,
-  },
-  menuItem: {
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-  },
-  menuItemText: {
-    fontSize: 16,
-    color: '#222',
-  },
-  avatarShadowWrapper: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    elevation: 8,
-    borderRadius: 60,
-    marginBottom: 8,
-  },
-  avatarLarge: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 3,
-    borderColor: '#fff',
-    backgroundColor: '#eee',
-  },
-  profileNameLarge: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 4,
-    color: '#fff',
-    textAlign: 'center',
-  },
-  profileUsernameLarge: {
-    fontSize: 16,
-    color: '#aaa',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  profileBioLarge: {
-    fontSize: 14,
-    color: '#ccc',
-    textAlign: 'center',
-    marginBottom: 10,
-    marginTop: 2,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  statItem: {
-    alignItems: 'center',
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginHorizontal: 4,
+    marginHorizontal: 20,
   },
   statValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
     color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
   },
   statLabel: {
-    fontSize: 13,
-    color: '#aaa',
+    color: '#999',
+    fontSize: 12,
+    marginTop: 2,
   },
-  menuButton: {
-    position: 'absolute',
-    top: 18,
-    right: 18,
-    padding: 8,
-    zIndex: 10,
+  editButton: {
+    backgroundColor: '#1a1a1a',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#333',
   },
-  overlayBackdrop: {
+  editButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  tab: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 20,
+    marginHorizontal: 2,
+    backgroundColor: '#1a1a1a',
+  },
+  tabActive: {
+    backgroundColor: 'rgba(96, 165, 250, 0.2)',
+  },
+  tabText: {
+    color: '#666',
+    fontSize: 12,
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  tabTextActive: {
+    color: '#60a5fa',
+  },
+  postsGrid: {
+    padding: 2,
+  },
+  postItem: {
+    width: (screenWidth - 6) / 3,
+    height: (screenWidth - 6) / 3 * 1.5,
+    margin: 1,
+    position: 'relative',
+  },
+  postMedia: {
+    width: '100%',
+    height: '100%',
+  },
+  postOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  postStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  postStatText: {
+    color: '#fff',
+    fontSize: 12,
+    marginLeft: 4,
+  },
+  statusIndicator: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 60,
+    width: screenWidth,
+  },
+  emptyText: {
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  createButton: {
+    backgroundColor: '#60a5fa',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
+  },
+  createButtonText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  menuContainer: {
+    backgroundColor: '#18181b',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+    backgroundColor: '#232326',
+  },
+  menuItemDanger: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  },
+  menuItemText: {
+    color: '#fff',
+    fontSize: 16,
+    marginLeft: 12,
+  },
+  postModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  overlayContent: {
-    width: '92%',
-    backgroundColor: '#232326',
-    borderRadius: 18,
-    padding: 18,
-    alignItems: 'center',
+  postModalContainer: {
+    width: '90%',
+    backgroundColor: '#18181b',
+    borderRadius: 20,
+    padding: 16,
     position: 'relative',
   },
-  overlayClose: {
+  postModalClose: {
     position: 'absolute',
-    top: 10,
-    right: 10,
+    top: 16,
+    right: 16,
     zIndex: 10,
-    padding: 6,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 20,
+    padding: 8,
   },
-  overlayMedia: {
-    width: 260,
-    height: 260,
-    borderRadius: 12,
-    marginBottom: 16,
-    backgroundColor: '#111',
-  },
-  overlayCaption: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  overlayMeta: {
-    fontSize: 13,
-    color: '#aaa',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  overlayCommentsSection: {
+  postModalMedia: {
     width: '100%',
-    marginTop: 10,
-    marginBottom: 10,
+    height: 300,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 16,
   },
-  overlayCommentsTitle: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 4,
+  modalMedia: {
+    width: '100%',
+    height: '100%',
   },
-  overlayCommentsPlaceholder: {
-    fontSize: 13,
-    color: '#aaa',
-    fontStyle: 'italic',
-  },
-  overlayActions: {
+  postModalActions: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    width: '100%',
-    marginTop: 18,
   },
-  overlayActionBtn: {
-    alignItems: 'center',
-    marginHorizontal: 10,
-  },
-  overlayActionText: {
-    color: '#fff',
-    fontSize: 13,
-    marginTop: 2,
-  },
-  menuOverlayBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    justifyContent: 'flex-end',
-  },
-  menuDropdownActions: {
-    backgroundColor: '#232326',
-    borderRadius: 14,
-    margin: 18,
-    paddingVertical: 8,
-    paddingHorizontal: 0,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 8,
-    zIndex: 100,
-    minWidth: 180,
-  },
-  contactInfo: {
-    marginTop: 10,
-    width: '100%',
-  },
-  contactItem: {
+  modalActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 20,
+    backgroundColor: '#232326',
   },
-  contactText: {
-    marginLeft: 6,
+  modalActionButtonDanger: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  },
+  modalActionText: {
+    color: '#fff',
     fontSize: 14,
+    marginLeft: 8,
   },
-}); 
+});
