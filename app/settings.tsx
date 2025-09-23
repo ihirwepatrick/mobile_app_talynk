@@ -152,7 +152,9 @@ export default function SettingsScreen() {
           <View key={section.title} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>
             
-            {section.items.map((item, itemIndex) => (
+            {section.items.map((item, itemIndex) => {
+              const isDanger = 'danger' in item && Boolean((item as { danger?: boolean }).danger);
+              return (
               <TouchableOpacity
                 key={item.key}
                 style={[
@@ -169,11 +171,11 @@ export default function SettingsScreen() {
                   <MaterialIcons 
                     name={item.icon as any} 
                     size={24} 
-                    color={item.danger ? '#ef4444' : '#60a5fa'} 
+                    color={isDanger ? '#ef4444' : '#60a5fa'} 
                   />
                   <Text style={[
                     styles.settingLabel,
-                    item.danger && styles.settingLabelDanger
+                    isDanger && styles.settingLabelDanger
                   ]}>
                     {item.label}
                   </Text>
@@ -190,7 +192,7 @@ export default function SettingsScreen() {
                   <Feather name="chevron-right" size={20} color="#666" />
                 )}
               </TouchableOpacity>
-            ))}
+            );})}
           </View>
         ))}
 
