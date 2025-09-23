@@ -298,7 +298,7 @@ export default function PostDetailScreen() {
       </View>
 
       {/* Comment Input */}
-      <View style={styles.commentInputContainer}>
+      <View style={[styles.commentInputContainer, { paddingBottom: insets.bottom + 12 }]}>
         <TextInput
           style={styles.commentInput}
           placeholder="Add a comment..."
@@ -543,7 +543,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    paddingBottom: insets.bottom + 12,
     backgroundColor: '#1a1a1a',
     borderTopWidth: 1,
     borderTopColor: '#333',

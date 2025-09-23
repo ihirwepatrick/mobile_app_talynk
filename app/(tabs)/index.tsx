@@ -240,11 +240,11 @@ const PostItem: React.FC<PostItemProps> = ({
               onError={() => setImageError(true)}
             />
           ) : (
-            <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={handleVideoTap}>
+            <TouchableOpacity style={{ flex: 1, backgroundColor: '#000' }} activeOpacity={1} onPress={handleVideoTap}>
               <Video
                 ref={videoRef}
                 source={{ uri: mediaUrl }}
-                style={styles.media}
+                style={[styles.media, { backgroundColor: '#000' }]}
                 resizeMode={ResizeMode.COVER}
                 shouldPlay={isActive}
                 isLooping
@@ -266,7 +266,7 @@ const PostItem: React.FC<PostItemProps> = ({
         ) : (
           <Image
             source={{ uri: imageError ? 'https://via.placeholder.com/300x500' : mediaUrl }}
-            style={styles.media}
+            style={[styles.media, { backgroundColor: '#000' }]}
             resizeMode="cover"
             onError={() => setImageError(true)}
           />
@@ -346,13 +346,15 @@ const PostItem: React.FC<PostItemProps> = ({
 
         {/* Bottom Info */}
         <View style={[styles.bottomInfo, { paddingBottom: 120 + insets.bottom }]}>
-          <TouchableOpacity onPress={handleUserPress}>
-            <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
-          </TouchableOpacity>
-          
-          <Text style={styles.caption} numberOfLines={3}>
-            {item.description || item.caption || item.title || ''}
-          </Text>
+          <View style={styles.bottomInfoContent}>
+            <TouchableOpacity onPress={handleUserPress}>
+              <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
+            </TouchableOpacity>
+            
+            <Text style={styles.caption} numberOfLines={3}>
+              {item.description || item.caption || item.title || ''}
+            </Text>
+          </View>
 
           {/* Category Badge */}
           {item.category && (
@@ -532,7 +534,7 @@ export default function FeedScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+      <StatusBar barStyle="light-content" translucent />
       
       {/* Header with tabs and search */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
@@ -685,11 +687,13 @@ const styles = StyleSheet.create({
   mediaContainer: {
     flex: 1,
     position: 'relative',
+    backgroundColor: '#000',
   },
   media: {
     flex: 1,
     width: '100%',
     height: '100%',
+    backgroundColor: '#000',
   },
   muteButton: {
     position: 'absolute',
@@ -750,18 +754,31 @@ const styles = StyleSheet.create({
     right: 80,
     bottom: 0,
     zIndex: 10,
+    backgroundColor: 'transparent',
+  },
+  bottomInfoContent: {
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
   },
   username: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   caption: {
     color: '#fff',
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   categoryBadge: {
     alignSelf: 'flex-start',

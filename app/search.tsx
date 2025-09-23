@@ -214,6 +214,7 @@ export default function SearchScreen() {
         </View>
       ) : (
         <FlatList
+          key={activeTab}
           data={searchResults}
           renderItem={activeTab === 'posts' ? renderPostResult : renderUserResult}
           keyExtractor={(item) => item.id}

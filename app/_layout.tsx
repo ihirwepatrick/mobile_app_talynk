@@ -67,7 +67,7 @@ function RootLayoutNav() {
             <Stack.Screen name="search" options={{ headerShown: false }} />
             <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
           </Stack>
-          <StatusBar style="light" backgroundColor="#000000" />
+          <StatusBar style="light" />
         </ThemeProvider>
       </AuthProvider>
     </CacheProvider>

@@ -12,6 +12,7 @@ import {
   Share,
   Alert,
   RefreshControl,
+  Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
@@ -21,6 +22,8 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { Video, ResizeMode } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditProfileModal } from '@/components/EditProfileModal';
+
+const { width: screenWidth } = Dimensions.get('window');
 
 const PROFILE_TABS = [
   { key: 'approved', label: 'Approved', icon: 'check-circle' },
@@ -41,6 +44,11 @@ export default function ProfileScreen() {
   const [postModalVisible, setPostModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [totalLikes, setTotalLikes] = useState(0);
+  const [videoRef, setVideoRef] = useState<Video | null>(null);
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  const [videoError, setVideoError] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(false);
+  const [useNativeControls, setUseNativeControls] = useState(false);
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -51,6 +59,14 @@ export default function ProfileScreen() {
     loadProfile();
     loadPosts();
   }, [user, activeTab]);
+
+  // Cleanup video when modal closes
+  useEffect(() => {
+    if (!postModalVisible && videoRef && isVideoPlaying) {
+      videoRef.pauseAsync().catch(() => {});
+      resetVideoState();
+    }
+  }, [postModalVisible]);
 
   const loadProfile = async () => {
     try {
@@ -116,6 +132,66 @@ export default function ProfileScreen() {
     Promise.all([loadProfile(), loadPosts()]).finally(() => setRefreshing(false));
   };
 
+  const handleVideoPlayPause = async () => {
+    if (videoRef) {
+      try {
+        if (isVideoPlaying) {
+          await videoRef.pauseAsync();
+          setIsVideoPlaying(false);
+        } else {
+          await videoRef.playAsync();
+          setIsVideoPlaying(true);
+        }
+      } catch (error) {
+        console.error('Video play/pause error:', error);
+      }
+    }
+  };
+
+  const handleVideoLoad = () => {
+    setVideoError(false);
+    console.log('Video loaded successfully');
+  };
+
+  const handleVideoError = (error: any) => {
+    console.error('Video error:', error);
+    setVideoError(true);
+    setIsVideoPlaying(false);
+    setVideoLoading(false);
+    
+    // Auto-fallback to native controls for decoder errors
+    if (error?.message?.includes('Decoder') || error?.message?.includes('decoder')) {
+      console.log('Decoder error detected, falling back to native controls');
+      setUseNativeControls(true);
+      setVideoError(false);
+    }
+  };
+
+  const handleVideoLoadStart = () => {
+    console.log('Video loading started');
+    setVideoError(false);
+    setVideoLoading(true);
+  };
+
+  const handleVideoLoadEnd = () => {
+    console.log('Video loading completed');
+    setVideoLoading(false);
+  };
+
+  const handlePlaybackStatusUpdate = (status: any) => {
+    if (status.isLoaded) {
+      setIsVideoPlaying(status.isPlaying);
+    }
+  };
+
+  const resetVideoState = () => {
+    setIsVideoPlaying(false);
+    setVideoError(false);
+    setVideoLoading(false);
+    setUseNativeControls(false);
+    setVideoRef(null);
+  };
+
   const handleDeletePost = async (postId: string) => {
     Alert.alert(
       'Delete Post',
@@ -144,6 +220,7 @@ export default function ProfileScreen() {
         style={styles.postItem}
         onPress={() => {
           setSelectedPost(item);
+          resetVideoState();
           setPostModalVisible(true);
         }}
       >
@@ -401,7 +478,13 @@ export default function ProfileScreen() {
           <View style={styles.postModalContainer}>
             <TouchableOpacity 
               style={styles.postModalClose}
-              onPress={() => setPostModalVisible(false)}
+              onPress={() => {
+                if (videoRef && isVideoPlaying) {
+                  videoRef.pauseAsync();
+                }
+                setPostModalVisible(false);
+                resetVideoState();
+              }}
             >
               <MaterialIcons name="close" size={24} color="#fff" />
             </TouchableOpacity>
@@ -411,13 +494,93 @@ export default function ProfileScreen() {
                 {/* Media */}
                 <View style={styles.postModalMedia}>
                   {selectedPost.video_url ? (
-                    <Video
-                      source={{ uri: selectedPost.video_url }}
-                      style={styles.modalMedia}
-                      resizeMode={ResizeMode.CONTAIN}
-                      useNativeControls
-                      shouldPlay
-                    />
+                    videoError ? (
+                      <View style={styles.videoErrorContainer}>
+                        <MaterialIcons name="error-outline" size={48} color="#666" />
+                        <Text style={styles.videoErrorText}>Video failed to load</Text>
+                        <TouchableOpacity 
+                          style={styles.retryButton}
+                          onPress={() => {
+                            setVideoError(false);
+                            resetVideoState();
+                          }}
+                        >
+                          <Text style={styles.retryButtonText}>Retry</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                          style={[styles.retryButton, { backgroundColor: '#10b981', marginTop: 8 }]}
+                          onPress={() => {
+                            setVideoError(false);
+                            setUseNativeControls(true);
+                            resetVideoState();
+                          }}
+                        >
+                          <Text style={styles.retryButtonText}>Use Native Player</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity 
+                        style={styles.videoContainer}
+                        activeOpacity={1}
+                        onPress={handleVideoPlayPause}
+                      >
+                        <Video
+                          ref={setVideoRef}
+                          source={{ 
+                            uri: selectedPost.video_url,
+                            headers: {
+                              'User-Agent': 'Talynk-Mobile-App'
+                            }
+                          }}
+                          style={styles.modalMedia}
+                          resizeMode={ResizeMode.CONTAIN}
+                          useNativeControls={useNativeControls}
+                          shouldPlay={useNativeControls ? true : false}
+                          isLooping={false}
+                          isMuted={false}
+                          volume={1.0}
+                          rate={1.0}
+                          shouldCorrectPitch={true}
+                          progressUpdateInterval={1000}
+                          onLoad={handleVideoLoad}
+                          onError={handleVideoError}
+                          onLoadStart={handleVideoLoadStart}
+                          onLoadEnd={handleVideoLoadEnd}
+                          onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+                          posterSource={{ uri: selectedPost.image || '' }}
+                          usePoster={true}
+                        />
+                        {/* Play/Pause Overlay */}
+                        {!useNativeControls && (
+                          <View style={styles.videoOverlay}>
+                            {videoLoading ? (
+                              <View style={styles.loadingContainer}>
+                                <ActivityIndicator size="large" color="#60a5fa" />
+                                <Text style={styles.loadingText}>Loading video...</Text>
+                              </View>
+                            ) : (
+                              <TouchableOpacity 
+                                style={styles.playPauseButton}
+                                onPress={handleVideoPlayPause}
+                              >
+                                <MaterialIcons 
+                                  name={isVideoPlaying ? "pause" : "play-arrow"} 
+                                  size={48} 
+                                  color="#fff" 
+                                />
+                              </TouchableOpacity>
+                            )}
+                            {/* Fallback to native controls button */}
+                            <TouchableOpacity 
+                              style={styles.nativeControlsButton}
+                              onPress={() => setUseNativeControls(true)}
+                            >
+                              <MaterialIcons name="settings" size={20} color="#fff" />
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    )
                   ) : (
                     <Image 
                       source={{ uri: selectedPost.image || '' }} 
@@ -465,17 +628,6 @@ export default function ProfileScreen() {
       />
     </View>
   );
-
-  const handleDeletePost = async (postId: string) => {
-    try {
-      await postsApi.deletePost(postId);
-      setPosts(prev => prev.filter(p => p.id !== postId));
-      setPostModalVisible(false);
-      Alert.alert('Success', 'Post deleted successfully');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to delete post');
-    }
-  };
 }
 
 const styles = StyleSheet.create({
@@ -749,5 +901,70 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     marginLeft: 8,
+  },
+  videoContainer: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+  },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  playPauseButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 30,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoErrorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+  },
+  videoErrorText: {
+    color: '#666',
+    fontSize: 16,
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: '#60a5fa',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  retryButtonText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 14,
+    marginTop: 8,
+  },
+  nativeControlsButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 20,
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
