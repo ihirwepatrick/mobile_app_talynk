@@ -67,6 +67,7 @@ export default function LoginScreen() {
   const { login, loading } = useAuth();
   const colorScheme = useColorScheme() || 'light';
   const C = COLORS[colorScheme];
+  
 
   const handleLogin = async () => {
     setError(null);
@@ -91,6 +92,21 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+        {/* Back button */}
+        <View style={styles.navRow}>
+          <TouchableOpacity
+            onPress={() => {
+              if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.replace('/(tabs)');
+              }
+            }}
+            style={styles.backButton}
+          >
+            <Ionicons name="chevron-back" size={26} color={C.text} />
+          </TouchableOpacity>
+        </View>
         <View style={styles.header}>
           <Text style={[styles.title, { color: C.text }]}>Sign in to Talynk</Text>
           <Text style={[styles.subtitle, { color: C.textSecondary }]}>Welcome back! Please login to your account.</Text>
@@ -218,6 +234,19 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 32,
+  },
+  navRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    marginBottom: 8,
+  },
+  backButton: {
+    padding: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: 'transparent',
+    borderColor: '#333',
+    borderWidth: 1,
+    borderRadius: 24,
   },
   title: {
     fontSize: 28,

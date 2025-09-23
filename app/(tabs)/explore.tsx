@@ -23,21 +23,37 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
-const CATEGORIES = [
-  'All', 'Entertainment', 'Sports', 'Technology', 'Music', 'Comedy', 
-  'Education', 'Fashion', 'Food', 'Travel', 'Art', 'Dance'
+type Category = {
+  name: string;
+  sub?: string[];
+};
+
+const CATEGORIES: Category[] = [
+  { name: 'All' },
+  { name: 'Entertainment', sub: ['Movies', 'Series', 'Celebrities'] },
+  { name: 'Sports', sub: ['Football', 'Basketball', 'Tennis'] },
+  { name: 'Technology', sub: ['AI', 'Gadgets', 'Programming'] },
+  { name: 'Music', sub: ['Hip Hop', 'Afrobeats', 'Pop'] },
+  { name: 'Comedy', sub: ['Skits', 'Standup'] },
+  { name: 'Education', sub: ['Science', 'History', 'How-to'] },
+  { name: 'Fashion', sub: ['Street', 'Runway', 'Design'] },
+  { name: 'Food', sub: ['Recipes', 'Street Food', 'Reviews'] },
+  { name: 'Travel', sub: ['Vlogs', 'Guides'] },
+  { name: 'Art', sub: ['Digital', 'Traditional'] },
+  { name: 'Dance', sub: ['Choreo', 'Freestyle'] },
 ];
 
 const EXPLORE_TABS = [
   { key: 'trending', label: 'Trending' },
   { key: 'discover', label: 'Discover' },
-  { key: 'live', label: 'Live' },
 ];
 
 export default function ExploreScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('trending');
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [suggestions, setSuggestions] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +64,7 @@ export default function ExploreScreen() {
 
   useEffect(() => {
     loadContent();
-  }, [activeTab, selectedCategory]);
+  }, [activeTab, selectedCategory, selectedSubCategory]);
 
   const loadContent = async () => {
     setLoading(true);
@@ -66,6 +82,13 @@ export default function ExploreScreen() {
           filteredPosts = filteredPosts.filter(post => {
             const postCategory = typeof post.category === 'string' ? post.category : post.category?.name;
             return postCategory === selectedCategory;
+          });
+        }
+        // Filter by subcategory if any
+        if (selectedSubCategory) {
+          filteredPosts = filteredPosts.filter(post => {
+            const tagList: string[] = Array.isArray((post as any).tags) ? (post as any).tags : [];
+            return tagList.map(t => String(t)).includes(selectedSubCategory as string);
           });
         }
         
@@ -198,16 +221,11 @@ export default function ExploreScreen() {
         {EXPLORE_TABS.map((tab) => (
           <TouchableOpacity
             key={tab.key}
-            style={[
-              styles.tab,
-              activeTab === tab.key && styles.tabActive
-            ]}
+            style={[styles.tab, activeTab === tab.key && styles.tabActive]}
             onPress={() => setActiveTab(tab.key)}
+            activeOpacity={0.8}
           >
-            <Text style={[
-              styles.tabText,
-              activeTab === tab.key && styles.tabTextActive
-            ]}>
+            <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>
               {tab.label}
             </Text>
           </TouchableOpacity>
@@ -221,23 +239,50 @@ export default function ExploreScreen() {
         style={styles.categoriesContainer}
         contentContainerStyle={styles.categoriesContent}
       >
-        {CATEGORIES.map((category) => (
-          <TouchableOpacity
-            key={category}
-            style={[
-              styles.categoryPill,
-              selectedCategory === category && styles.categoryPillActive
-            ]}
-            onPress={() => setSelectedCategory(category)}
-          >
-            <Text style={[
-              styles.categoryPillText,
-              selectedCategory === category && styles.categoryPillTextActive
-            ]}>
-              {category}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {CATEGORIES.map((cat) => {
+          const isSelected = selectedCategory === cat.name;
+          const isExpanded = expandedCategory === cat.name;
+          return (
+            <View key={cat.name} style={styles.categoryItemWrap}>
+              <TouchableOpacity
+                style={[styles.categoryPill, isSelected && styles.categoryPillActive]}
+                onPress={() => {
+                  setSelectedCategory(cat.name);
+                  setSelectedSubCategory(null);
+                }}
+                onLongPress={() => {
+                  if (cat.sub && cat.sub.length > 0) {
+                    setExpandedCategory(isExpanded ? null : cat.name);
+                  }
+                }}
+                activeOpacity={0.9}
+              >
+                <Text style={[styles.categoryPillText, isSelected && styles.categoryPillTextActive]}>
+                  {cat.name}
+                </Text>
+                {cat.sub && cat.sub.length > 0 && (
+                  <Feather name={isExpanded ? 'minus' : 'plus'} size={14} color={isSelected ? '#000' : '#666'} />
+                )}
+              </TouchableOpacity>
+              {isExpanded && cat.sub && (
+                <View style={styles.subCategoryRow}>
+                  {cat.sub.map((sub) => {
+                    const subActive = selectedSubCategory === sub;
+                    return (
+                      <TouchableOpacity
+                        key={sub}
+                        style={[styles.subTag, subActive && styles.subTagActive]}
+                        onPress={() => setSelectedSubCategory(subActive ? null : sub)}
+                      >
+                        <Text style={[styles.subTagText, subActive && styles.subTagTextActive]}>{sub}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          );
+        })}
       </ScrollView>
 
       <ScrollView 
@@ -313,14 +358,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 16,
     marginBottom: 12,
+    gap: 8,
   },
   tab: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: 12,
     borderRadius: 20,
-    marginHorizontal: 2,
     backgroundColor: '#1a1a1a',
+    minWidth: 100,
   },
   tabActive: {
     backgroundColor: '#60a5fa',
@@ -340,12 +386,17 @@ const styles = StyleSheet.create({
   categoriesContent: {
     paddingHorizontal: 16,
   },
+  categoryItemWrap: {
+    marginRight: 8,
+  },
   categoryPill: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 16,
-    marginRight: 8,
     backgroundColor: '#1a1a1a',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   categoryPillActive: {
     backgroundColor: '#60a5fa',
@@ -358,6 +409,32 @@ const styles = StyleSheet.create({
   categoryPillTextActive: {
     color: '#000',
     fontWeight: '600',
+  },
+  subCategoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  subTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#1f2937',
+  },
+  subTagActive: {
+    backgroundColor: '#60a5fa',
+    borderColor: '#60a5fa',
+  },
+  subTagText: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  subTagTextActive: {
+    color: '#000',
   },
   suggestionsSection: {
     marginBottom: 24,
