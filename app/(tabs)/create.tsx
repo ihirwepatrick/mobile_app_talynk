@@ -14,6 +14,7 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { postsApi } from '@/lib/api';
@@ -22,6 +23,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { Video, ResizeMode } from 'expo-av';
 import { uploadNotificationService } from '@/lib/notification-service';
+import { categoriesApi } from '@/lib/api';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -84,7 +87,7 @@ const MAIN_CATEGORY_GROUPS = Object.keys(CATEGORIES_STRUCTURE);
 
 const COLORS = {
   dark: {
-    background: '#18181b',
+    background: '#000000',
     card: '#232326',
     border: '#27272a',
     text: '#f3f4f6',
@@ -146,8 +149,12 @@ export default function CreatePostScreen() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errors, setErrors] = useState<{ [k: string]: string }>({});
   const [accordionOpen, setAccordionOpen] = useState(false);
-  const colorScheme = useColorScheme() || 'dark';
-  const C = COLORS[colorScheme];
+  const C = COLORS.dark; // Force dark
+  const [mainCategories, setMainCategories] = useState<{ id: number, name: string, children?: { id: number, name: string }[] }[]>([]);
+  const [subcategories, setSubcategories] = useState<{ id: number, name: string }[]>([]);
+  const insets = useSafeAreaInsets();
+  const [loadingCategories, setLoadingCategories] = useState<boolean>(false);
+  const [loadingSubcategories, setLoadingSubcategories] = useState<boolean>(false);
 
   // Animated values for liquid progress
   const liquidProgress = new Animated.Value(0);
@@ -167,6 +174,32 @@ export default function CreatePostScreen() {
   };
 
   // --- LIQUID PROGRESS ANIMATION ---
+  // --- FETCH CATEGORIES ---
+  useEffect(() => {
+    const loadCategories = async () => {
+      setLoadingCategories(true);
+      const res = await categoriesApi.getAll();
+      if (res.status === 'success' && (res.data as any)?.categories) {
+        const cats = (res.data as any).categories as { id: number, name: string, children?: any[] }[];
+        const mains = cats.map(c => ({ id: c.id, name: c.name, children: (c.children || []).map(sc => ({ id: sc.id, name: sc.name })) }));
+        setMainCategories(mains);
+      }
+      setLoadingCategories(false);
+    };
+    loadCategories();
+  }, []);
+
+  useEffect(() => {
+    const loadSubs = async () => {
+      if (!selectedGroup) { setSubcategories([]); return; }
+      setLoadingSubcategories(true);
+      const parent = mainCategories.find(c => c.name === selectedGroup);
+      if (!parent) { setSubcategories([]); return; }
+      setSubcategories(parent.children || []);
+      setLoadingSubcategories(false);
+    };
+    loadSubs();
+  }, [selectedGroup, mainCategories]);
   useEffect(() => {
     if (uploading) {
       Animated.timing(liquidOpacity, {
@@ -427,16 +460,17 @@ export default function CreatePostScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: C.background }]}>
+      <StatusBar style="light" backgroundColor="#000000" />
       {/* Upload Progress Bar */}
       {uploading && <LiquidProgressBar />}
       
       <ScrollView 
-        style={styles.scrollView}
+        style={[styles.scrollView, { backgroundColor: C.background }]}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Content Authenticity Warning Accordion */}
-        <View style={[styles.warningBox, { backgroundColor: C.card, borderColor: C.warning }]}>
+        <View style={[styles.warningBox, { backgroundColor: C.card, borderColor: C.warning, marginTop: insets.top + 8 }]}> 
           <TouchableOpacity 
             style={styles.accordionHeader}
             onPress={() => setAccordionOpen(!accordionOpen)}
@@ -521,7 +555,12 @@ export default function CreatePostScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.pillRow}
             >
-          {MAIN_CATEGORY_GROUPS.map(group => (
+          {loadingCategories ? (
+            [1,2,3,4,5,6].map((i) => (
+              <View key={`cat-skel-${i}`} style={[styles.pillSkeleton, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]} />
+            ))
+          ) : (
+            (mainCategories.length ? mainCategories.map(c => c.name) : MAIN_CATEGORY_GROUPS).map(group => (
             <TouchableOpacity
               key={group}
                   style={[
@@ -537,7 +576,8 @@ export default function CreatePostScreen() {
                     {group}
                   </Text>
             </TouchableOpacity>
-          ))}
+            ))
+          )}
             </ScrollView>
             {errors.group && <Text style={[styles.errorText, { color: C.error }]}>{errors.group}</Text>}
         </View>
@@ -551,23 +591,29 @@ export default function CreatePostScreen() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.pillRow}
               >
-          {getCategoriesForGroup().map((cat: { id: number; name: string }) => (
-            <TouchableOpacity
-              key={cat.id}
-                    style={[
-                      styles.pill, 
-                      selectedCategoryId === String(cat.id) && { backgroundColor: C.primary, borderColor: C.primary }
-                    ]}
-              onPress={() => setSelectedCategoryId(String(cat.id))}
-            >
-                    <Text style={[
-                      styles.pillText, 
-                      { color: selectedCategoryId === String(cat.id) ? C.buttonText : C.text }
-                    ]}>
-                      {cat.name}
-                    </Text>
-            </TouchableOpacity>
-          ))}
+          {loadingSubcategories ? (
+            [1,2,3,4].map((i) => (
+              <View key={`subcat-skel-${i}`} style={[styles.pillSkeleton, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]} />
+            ))
+          ) : (
+            (subcategories.length ? subcategories : getCategoriesForGroup()).map((cat: { id: number; name: string }) => (
+              <TouchableOpacity
+                key={cat.id}
+                      style={[
+                        styles.pill, 
+                        selectedCategoryId === String(cat.id) && { backgroundColor: C.primary, borderColor: C.primary }
+                      ]}
+                onPress={() => setSelectedCategoryId(String(cat.id))}
+              >
+                      <Text style={[
+                        styles.pillText, 
+                        { color: selectedCategoryId === String(cat.id) ? C.buttonText : C.text }
+                      ]}>
+                        {cat.name}
+                      </Text>
+              </TouchableOpacity>
+            ))
+          )}
               </ScrollView>
               {errors.category && <Text style={[styles.errorText, { color: C.error }]}>{errors.category}</Text>}
         </View>
@@ -754,6 +800,14 @@ const styles = StyleSheet.create({
   pill: {
     paddingVertical: 10,
     paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  pillSkeleton: {
+    height: 38,
+    width: 110,
     borderRadius: 20,
     borderWidth: 1,
     marginRight: 8,

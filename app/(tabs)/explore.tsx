@@ -75,28 +75,30 @@ export default function ExploreScreen() {
       ]);
 
       if (postsResponse.status === 'success') {
-        let filteredPosts = postsResponse.data;
+        const apiData: any = (postsResponse as any).data;
+        let filteredPosts: Post[] = Array.isArray(apiData) ? apiData : (Array.isArray(apiData?.posts) ? apiData.posts : []);
         
         // Filter by category
         if (selectedCategory !== 'All') {
-          filteredPosts = filteredPosts.filter(post => {
+          filteredPosts = filteredPosts.filter((post: Post) => {
             const postCategory = typeof post.category === 'string' ? post.category : post.category?.name;
             return postCategory === selectedCategory;
           });
         }
         // Filter by subcategory if any
         if (selectedSubCategory) {
-          filteredPosts = filteredPosts.filter(post => {
+          filteredPosts = filteredPosts.filter((post: Post) => {
             const tagList: string[] = Array.isArray((post as any).tags) ? (post as any).tags : [];
             return tagList.map(t => String(t)).includes(selectedSubCategory as string);
           });
         }
         
-        setPosts(filteredPosts);
+        setPosts(Array.isArray(filteredPosts) ? filteredPosts : []);
       }
 
       if (suggestionsResponse.status === 'success') {
-        setSuggestions(suggestionsResponse.data?.suggestions || []);
+        const list = suggestionsResponse.data?.suggestions || suggestionsResponse.data?.data?.suggestions || suggestionsResponse.data?.data || [];
+        setSuggestions(Array.isArray(list) ? list : []);
       }
     } catch (error) {
       console.error('Error loading explore content:', error);

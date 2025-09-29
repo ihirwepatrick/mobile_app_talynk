@@ -18,7 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Video, ResizeMode } from 'expo-av';
 import { router } from 'expo-router';
-import { postsApi } from '@/lib/api';
+import { postsApi, likesApi } from '@/lib/api';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
@@ -449,14 +449,9 @@ export default function FeedScreen() {
   const handleLike = async (postId: string) => {
     const isCurrentlyLiked = likedPosts.has(postId);
     updateLikedPosts(postId, !isCurrentlyLiked);
-
     try {
-      const response = isCurrentlyLiked 
-        ? await postsApi.unlike(postId)
-        : await postsApi.like(postId);
-      
+      const response = await likesApi.toggle(postId);
       if (response.status !== 'success') {
-        // Revert on error
         updateLikedPosts(postId, isCurrentlyLiked);
       }
     } catch (error) {

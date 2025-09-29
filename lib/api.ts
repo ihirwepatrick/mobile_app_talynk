@@ -73,6 +73,28 @@ export const countriesApi = {
   },
 };
 
+// Categories API
+export const categoriesApi = {
+  getAll: async (): Promise<ApiResponse<{ categories: any[] }>> => {
+    try {
+      const response = await apiClient.get('/api/categories');
+      // Backend returns { status, data: Category[] }
+      const list = Array.isArray(response.data?.data) ? response.data.data : [];
+      return {
+        status: response.data?.status || 'success',
+        message: response.data?.message || 'OK',
+        data: { categories: list },
+      };
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch categories',
+        data: { categories: [] },
+      };
+    }
+  },
+};
+
 // Posts API
 export const postsApi = {
   getAll: async (page = 1, limit = 10): Promise<ApiResponse<Post[]>> => {
@@ -240,7 +262,7 @@ export const postsApi = {
 export const userApi = {
   getProfile: async (): Promise<ApiResponse<User>> => {
     try {
-      const response = await apiClient.get('/api/profile');
+      const response = await apiClient.get('/api/user/profile');
       return response.data;
     } catch (error: any) {
       return {
@@ -400,7 +422,7 @@ export const followsApi = {
   // Follow a user
   follow: async (userId: string) => {
     try {
-      const response = await apiClient.post('/api/follows', { userId });
+      const response = await apiClient.post('/api/follows', { followingId: userId });
       return response.data;
     } catch (error: any) {
       return {
@@ -413,7 +435,7 @@ export const followsApi = {
   // Unfollow a user
   unfollow: async (userId: string) => {
     try {
-      const response = await apiClient.delete(`/api/follows/followingid`, { data: { userId } });
+      const response = await apiClient.delete(`/api/follows/${userId}`);
       return response.data;
     } catch (error: any) {
       return {
@@ -460,6 +482,22 @@ export const followsApi = {
         message: error.response?.data?.message || 'Failed to fetch following',
         data: { following: [] },
       };
+    }
+  },
+};
+
+// Likes API (per API_DOC)
+export const likesApi = {
+  toggle: async (postId: string): Promise<ApiResponse<{ isLiked: boolean; likeCount: number }>> => {
+    try {
+      const response = await apiClient.post(`/api/likes/posts/${postId}/toggle`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to toggle like',
+        data: { isLiked: false, likeCount: 0 },
+      } as any;
     }
   },
 };
