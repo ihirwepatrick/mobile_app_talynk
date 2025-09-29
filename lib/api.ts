@@ -1,5 +1,5 @@
 import { apiClient } from './api-client';
-import { ApiResponse, Post, User, Notification, LoginResponseData, RegisterFormData } from '../types';
+import { ApiResponse, Post, User, Notification, LoginResponseData, RegisterFormData, Country } from '../types';
 
 // Auth API
 export const authApi = {
@@ -40,6 +40,34 @@ export const authApi = {
         status: 'error',
         message: 'Token refresh failed',
         data: { accessToken: '' },
+      };
+    }
+  },
+};
+
+// Countries API
+export const countriesApi = {
+  getAll: async (): Promise<ApiResponse<{ countries: Country[] }>> => {
+    try {
+      const response = await apiClient.get('/api/countries');
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch countries',
+        data: { countries: [] },
+      };
+    }
+  },
+  search: async (q: string): Promise<ApiResponse<{ countries: Country[] }>> => {
+    try {
+      const response = await apiClient.get(`/api/countries/search?q=${encodeURIComponent(q)}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to search countries',
+        data: { countries: [] },
       };
     }
   },

@@ -13,10 +13,19 @@ export interface LoginResponseData {
 }
 
 export interface RegisterFormData {
-  username: string;
-  email: string;
+  username?: string;
+  email?: string;
   password: string;
-  [key: string]: any;
+  phone1: string;
+  phone2?: string;
+  country_id: number;
+}
+
+export interface Country {
+  id: number;
+  name: string;
+  code: string;
+  flag_emoji?: string;
 }
 
 export interface Post {
