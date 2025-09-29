@@ -11,49 +11,29 @@ import {
   ScrollView,
   ActivityIndicator,
   Pressable,
-  useColorScheme,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 
-const COLORS = {
-  light: {
-    background: '#fff',
-    card: '#f9f9f9',
-    border: '#e5e7eb',
-    text: '#222',
-    textSecondary: '#666',
-    input: '#f9f9f9',
-    inputBorder: '#ddd',
-    primary: '#007AFF',
-    errorBg: '#fef2f2',
-    errorBorder: '#fecaca',
-    successBg: '#f0fdf4',
-    successBorder: '#bbf7d0',
-    warningBg: '#fefce8',
-    warningBorder: '#fde68a',
-    placeholder: '#888',
-    buttonDisabled: '#ccc',
-  },
-  dark: {
-    background: '#18181b',
-    card: '#232326',
-    border: '#27272a',
-    text: '#f3f4f6',
-    textSecondary: '#a1a1aa',
-    input: '#232326',
-    inputBorder: '#27272a',
-    primary: '#60a5fa',
-    errorBg: '#7f1d1d',
-    errorBorder: '#b91c1c',
-    successBg: '#14532d',
-    successBorder: '#22c55e',
-    warningBg: '#78350f',
-    warningBorder: '#f59e42',
-    placeholder: '#71717a',
-    buttonDisabled: '#444',
-  },
+const THEME = {
+  background: '#000000',
+  card: '#232326',
+  border: '#27272a',
+  text: '#f3f4f6',
+  textSecondary: '#a1a1aa',
+  input: '#232326',
+  inputBorder: '#27272a',
+  primary: '#60a5fa',
+  errorBg: '#7f1d1d',
+  errorBorder: '#b91c1c',
+  successBg: '#14532d',
+  successBorder: '#22c55e',
+  warningBg: '#78350f',
+  warningBorder: '#f59e42',
+  placeholder: '#71717a',
+  buttonDisabled: '#444',
 };
 
 export default function LoginScreen() {
@@ -65,8 +45,7 @@ export default function LoginScreen() {
   const [success, setSuccess] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const { login, loading } = useAuth();
-  const colorScheme = useColorScheme() || 'light';
-  const C = COLORS[colorScheme];
+  const C = THEME;
   
 
   const handleLogin = async () => {
@@ -91,7 +70,8 @@ export default function LoginScreen() {
       style={[styles.container, { backgroundColor: C.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+      <StatusBar style="light" backgroundColor="#000000" />
+      <ScrollView style={[styles.scrollView, { backgroundColor: C.background }]} contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         {/* Back button */}
         <View style={styles.navRow}>
           <TouchableOpacity
@@ -102,7 +82,7 @@ export default function LoginScreen() {
                 router.replace('/(tabs)');
               }
             }}
-            style={styles.backButton}
+            style={[styles.backButton, { borderColor: C.border }]}
           >
             <Ionicons name="chevron-back" size={26} color={C.text} />
           </TouchableOpacity>
@@ -115,19 +95,19 @@ export default function LoginScreen() {
         {/* Alerts */}
         {error && (
           <View style={[styles.alert, { backgroundColor: C.errorBg, borderColor: C.errorBorder }]}> 
-            <Ionicons name="alert-circle" size={20} color={colorScheme === 'dark' ? '#fecaca' : '#dc2626'} style={{ marginRight: 8 }} />
+            <Ionicons name="alert-circle" size={20} color={'#fecaca'} style={{ marginRight: 8 }} />
             <Text style={[styles.alertText, { color: C.text }]}>{error}</Text>
           </View>
         )}
         {success && (
           <View style={[styles.alert, { backgroundColor: C.successBg, borderColor: C.successBorder }]}> 
-            <Ionicons name="checkmark-circle" size={20} color={colorScheme === 'dark' ? '#22c55e' : '#16a34a'} style={{ marginRight: 8 }} />
+            <Ionicons name="checkmark-circle" size={20} color={'#22c55e'} style={{ marginRight: 8 }} />
             <Text style={[styles.alertText, { color: C.text }]}>{success}</Text>
           </View>
         )}
         {warning && (
           <View style={[styles.alert, { backgroundColor: C.warningBg, borderColor: C.warningBorder }]}> 
-            <Ionicons name="warning" size={20} color={colorScheme === 'dark' ? '#fde68a' : '#f59e42'} style={{ marginRight: 8 }} />
+            <Ionicons name="warning" size={20} color={'#fde68a'} style={{ marginRight: 8 }} />
             <Text style={[styles.alertText, { color: C.text }]}>{warning}</Text>
           </View>
         )}
@@ -202,7 +182,7 @@ export default function LoginScreen() {
             activeOpacity={0.8}
           >
             {loading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={C.text} />
             ) : (
               <Text style={styles.buttonText}>Sign In</Text>
             )}
@@ -224,6 +204,9 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  scrollView: {
     flex: 1,
   },
   scrollContainer: {

@@ -10,12 +10,12 @@ import {
   Image,
   Dimensions,
   StatusBar,
-  SafeAreaView,
   Share,
   Animated,
   Alert,
   Modal,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Video, ResizeMode } from 'expo-av';
 import { router } from 'expo-router';
 import { postsApi } from '@/lib/api';
