@@ -25,6 +25,7 @@ import { Video, ResizeMode } from 'expo-av';
 import { uploadNotificationService } from '@/lib/notification-service';
 import { categoriesApi } from '@/lib/api';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '@/lib/auth-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -139,6 +140,7 @@ const COLORS = {
 };
 
 export default function CreatePostScreen() {
+  const { isAuthenticated, loading: authLoading, user } = useAuth();
   const [title, setTitle] = useState('');
   const [caption, setCaption] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
@@ -160,6 +162,62 @@ export default function CreatePostScreen() {
   const liquidProgress = new Animated.Value(0);
   const liquidOpacity = new Animated.Value(0);
 
+  // --- AUTHENTICATION CHECK ---
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      Alert.alert(
+        'Authentication Required',
+        'You need to be logged in to create posts. Would you like to sign in?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => router.replace('/(tabs)')
+          },
+          {
+            text: 'Sign In',
+            onPress: () => router.push('/auth/login')
+          }
+        ]
+      );
+    }
+  }, [isAuthenticated, authLoading]);
+
+  // Show loading screen while checking authentication
+  if (authLoading) {
+    return (
+      <View style={[styles.container, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={C.primary} />
+        <Text style={[{ fontSize: 16, marginTop: 12, fontWeight: '500' }, { color: C.text }]}>Loading...</Text>
+      </View>
+    );
+  }
+
+  // Show login prompt if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <View style={[styles.container, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <MaterialIcons name="lock" size={64} color={C.primary} />
+        <Text style={[{ fontSize: 24, fontWeight: '700', marginTop: 20, marginBottom: 12, textAlign: 'center' }, { color: C.text }]}>Authentication Required</Text>
+        <Text style={[{ fontSize: 16, lineHeight: 24, textAlign: 'center', marginBottom: 32 }, { color: C.textSecondary }]}>
+          You need to be logged in to create posts and share your content with the community.
+        </Text>
+        <TouchableOpacity
+          style={[{ paddingVertical: 16, paddingHorizontal: 32, borderRadius: 12, marginBottom: 12, minWidth: 200, alignItems: 'center' }, { backgroundColor: C.primary }]}
+          onPress={() => router.push('/auth/login')}
+        >
+          <Text style={[{ fontSize: 16, fontWeight: '600' }, { color: C.buttonText }]}>Sign In</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, borderWidth: 1, minWidth: 120, alignItems: 'center' }, { borderColor: C.border }]}
+          onPress={() => router.replace('/(tabs)')}
+        >
+          <Text style={[{ fontSize: 14, fontWeight: '500' }, { color: C.text }]}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   // --- CATEGORY HELPERS ---
   const getCategoriesForGroup = () => {
     if (!selectedGroup) return [];
@@ -168,9 +226,18 @@ export default function CreatePostScreen() {
   
   const getSelectedCategoryName = () => {
     if (!selectedCategoryId) return '';
+    // First try to find in loaded subcategories
+    const foundSub = subcategories.find(cat => String(cat.id) === selectedCategoryId);
+    if (foundSub) return foundSub.name;
+    
+    // Fallback to hardcoded structure
     const allCats = Object.values(CATEGORIES_STRUCTURE).flat();
     const found = allCats.find((cat: { id: number; name: string }) => String(cat.id) === selectedCategoryId);
     return found ? found.name : '';
+  };
+
+  const getSelectedCategoryId = () => {
+    return selectedCategoryId || '';
   };
 
   // --- LIQUID PROGRESS ANIMATION ---
@@ -302,6 +369,21 @@ export default function CreatePostScreen() {
 
   // --- SUBMIT ---
   const handleCreatePost = async () => {
+    // Double-check authentication before creating post
+    if (!isAuthenticated || !user) {
+      Alert.alert(
+        'Authentication Required',
+        'You need to be logged in to create posts.',
+        [
+          {
+            text: 'Sign In',
+            onPress: () => router.push('/auth/login')
+          }
+        ]
+      );
+      return;
+    }
+
     if (!validate()) return;
     
     // Request notification permissions
@@ -318,7 +400,20 @@ export default function CreatePostScreen() {
       const formData = new FormData();
       formData.append('title', title);
       formData.append('caption', caption);
-      formData.append('post_category', getSelectedCategoryName());
+      
+      // Send category name for post_category and ID for future matching
+      const categoryId = getSelectedCategoryId();
+      const categoryName = getSelectedCategoryName();
+      
+      console.log('Sending category data:', { 
+        categoryId, 
+        categoryName, 
+        selectedGroup, 
+        selectedCategoryId 
+      });
+      
+      formData.append('post_category', categoryName);
+      formData.append('category_id', categoryId);
       
       if (selectedMedia) {
         formData.append('file', {
