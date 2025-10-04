@@ -14,6 +14,7 @@ import {
   Animated,
   Alert,
   Modal,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Video, ResizeMode } from 'expo-av';
@@ -179,7 +180,7 @@ const PostItem: React.FC<PostItemProps> = ({
       ]).start();
     }
     
-    sendLikeAction(item.id, newIsLiked);
+      sendLikeAction(item.id, newIsLiked);
     await onLike(item.id);
     setIsLiking(false);
   };
@@ -206,12 +207,12 @@ const PostItem: React.FC<PostItemProps> = ({
   };
 
   const handleUserPress = () => {
-    if (item.user?.id) {
-      router.push({
-        pathname: '/user/[id]',
-        params: { id: item.user.id }
-      });
-    }
+            if (item.user?.id) {
+              router.push({
+                pathname: '/user/[id]',
+                params: { id: item.user.id }
+              });
+            }
   };
 
   const handleCategoryPress = () => {
@@ -342,26 +343,26 @@ const PostItem: React.FC<PostItemProps> = ({
           <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
             <Feather name="more-horizontal" size={32} color="#fff" />
           </TouchableOpacity>
-        </View>
+                </View>
 
         {/* Bottom Info */}
         <View style={[styles.bottomInfo, { paddingBottom: 120 + insets.bottom }]}>
           <View style={styles.bottomInfoContent}>
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
-            </TouchableOpacity>
+          </TouchableOpacity>
             
             <Text style={styles.caption} numberOfLines={3}>
               {item.description || item.caption || item.title || ''}
             </Text>
-          </View>
+        </View>
 
           {/* Category Badge */}
-          {item.category && (
+              {item.category && (
             <TouchableOpacity style={styles.categoryBadge} onPress={handleCategoryPress}>
-              <Text style={styles.categoryText}>
+                  <Text style={styles.categoryText}>
                 #{typeof item.category === 'string' ? item.category : item.category.name}
-              </Text>
+                  </Text>
             </TouchableOpacity>
           )}
 
@@ -407,27 +408,43 @@ export default function FeedScreen() {
       setLoading(refresh ? false : true);
       let response;
       
+      console.log(`Loading posts for tab: ${tab}, refresh: ${refresh}`);
+      
+      // Add timestamp to force fresh data on refresh
+      const timestamp = refresh ? `&t=${Date.now()}` : '';
+      
       // Load different content based on tab
       switch (tab) {
         case 'featured':
-          response = await postsApi.getAll(1, 20); // Featured posts (admin curated)
+          // Featured posts - get admin curated featured posts
+          response = await postsApi.getFeatured(1, 20, timestamp);
+          console.log('Featured posts response:', response);
           break;
         case 'foryou':
-          response = await postsApi.getAll(1, 20); // For you algorithm
+          // For you algorithm - get personalized posts (using all posts for now)
+          response = await postsApi.getAll(1, 20, timestamp);
+          console.log('For you posts response:', response);
           break;
         case 'following':
           if (user) {
-            response = await postsApi.getAll(1, 20); // Following posts
+            // Following posts - get posts from followed users
+            response = await postsApi.getFollowing(1, 20, timestamp);
+            console.log('Following posts response:', response);
           } else {
-            response = { status: 'success', data: [] };
+            response = { status: 'success', data: { posts: [], pagination: {}, filters: {} } };
           }
           break;
         default:
-          response = await postsApi.getAll(1, 20);
+          response = await postsApi.getAll(1, 20, timestamp);
       }
       
       if (response.status === 'success') {
-        setPosts(response.data);
+        // Handle nested response structure: data.posts instead of just data
+        const posts = response.data.posts || response.data;
+        console.log(`Setting ${posts.length} posts for ${tab} tab`);
+        setPosts(posts);
+      } else {
+        console.error('Failed to load posts:', response.message);
       }
     } catch (error) {
       console.error('Error loading posts:', error);
@@ -439,6 +456,19 @@ export default function FeedScreen() {
 
   useEffect(() => {
     loadPosts(activeTab);
+  }, [activeTab]);
+
+  // Reload posts when app comes back to foreground
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: string) => {
+      if (nextAppState === 'active') {
+        console.log('App became active, reloading posts...');
+        loadPosts(activeTab, true);
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription?.remove();
   }, [activeTab]);
 
   const onRefresh = () => {
@@ -605,7 +635,7 @@ export default function FeedScreen() {
                   : 'Pull down to refresh'
                 }
               </Text>
-            </View>
+              </View>
           }
         />
       </MuteContext.Provider>

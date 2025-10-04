@@ -33,14 +33,17 @@ export interface Post {
   title?: string;
   description?: string;
   caption?: string;
+  content?: string;
   image?: string;
   imageUrl?: string;
   video_url?: string;
   videoUrl?: string;
   mediaType?: 'image' | 'video';
+  type?: 'image' | 'video';
   fullUrl?: string;
   createdAt: string;
   updatedAt: string;
+  uploadDate?: string;
   user_id?: string;
   user_name?: string;
   authorName?: string;
@@ -51,14 +54,29 @@ export interface Post {
   comments_count?: number;
   commentsCount?: number;
   comment_count?: number;
+  shares?: number;
+  views?: number;
   comments?: Comment[];
   status?: 'approved' | 'pending' | 'rejected';
+  is_featured?: boolean;
+  is_frozen?: boolean;
+  report_count?: number;
+  featured_at?: string | null;
+  frozen_at?: string | null;
+  approver_id?: string | null;
+  admin_id?: string | null;
+  approved_at?: string | null;
   user?: {
     id: string;
-    name: string;
-    avatar: string;
+    name?: string;
     username?: string;
-    profile_picture?: string;
+    profile_picture?: string | null;
+    country?: {
+      id: number;
+      name: string;
+      code: string;
+      flag_emoji?: string;
+    };
   };
   category?: {
     id: number;

@@ -97,15 +97,41 @@ export const categoriesApi = {
 
 // Posts API
 export const postsApi = {
-  getAll: async (page = 1, limit = 10): Promise<ApiResponse<Post[]>> => {
+  getAll: async (page = 1, limit = 10, timestamp = ''): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
     try {
-      const response = await apiClient.get(`/api/posts/all?page=${page}&limit=${limit}`);
+      const response = await apiClient.get(`/api/posts/all?page=${page}&limit=${limit}${timestamp}`);
       return response.data;
     } catch (error: any) {
       return {
         status: 'error',
         message: 'Failed to fetch posts',
-        data: [],
+        data: { posts: [], pagination: {}, filters: {} },
+      };
+    }
+  },
+
+  getFollowing: async (page = 1, limit = 10, timestamp = ''): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
+    try {
+      const response = await apiClient.get(`/api/posts/following?page=${page}&limit=${limit}${timestamp}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: 'Failed to fetch following posts',
+        data: { posts: [], pagination: {}, filters: {} },
+      };
+    }
+  },
+
+  getFeatured: async (page = 1, limit = 10, timestamp = ''): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
+    try {
+      const response = await apiClient.get(`/api/posts/featured?page=${page}&limit=${limit}${timestamp}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: 'Failed to fetch featured posts',
+        data: { posts: [], pagination: {}, filters: {} },
       };
     }
   },
