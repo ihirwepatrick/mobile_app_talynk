@@ -28,6 +28,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
 import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import ReportModal from '@/components/ReportModal';
+import CommentsModal from '@/components/CommentsModal';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -397,6 +398,10 @@ export default function FeedScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
+  const [commentsModalVisible, setCommentsModalVisible] = useState(false);
+  const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
+  const [commentsPostTitle, setCommentsPostTitle] = useState<string>('');
+  const [commentsPostAuthor, setCommentsPostAuthor] = useState<string>('');
   const [isMuted, setIsMuted] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const { user } = useAuth();
@@ -508,10 +513,13 @@ export default function FeedScreen() {
   };
 
   const handleComment = (postId: string) => {
-    router.push({
-      pathname: '/post/[id]',
-      params: { id: postId }
-    });
+    const post = posts.find(p => p.id === postId);
+    if (post) {
+      setCommentsPostId(postId);
+      setCommentsPostTitle(post.title || '');
+      setCommentsPostAuthor(post.user?.username || '');
+      setCommentsModalVisible(true);
+    }
   };
 
   const handleShare = async (postId: string) => {
@@ -649,6 +657,15 @@ export default function FeedScreen() {
           setReportModalVisible(false);
           Alert.alert('Reported', 'Thank you for reporting this content. We will review it shortly.');
         }}
+      />
+
+      {/* Comments Modal */}
+      <CommentsModal
+        visible={commentsModalVisible}
+        onClose={() => setCommentsModalVisible(false)}
+        postId={commentsPostId || ''}
+        postTitle={commentsPostTitle}
+        postAuthor={commentsPostAuthor}
       />
     </SafeAreaView>
   );
