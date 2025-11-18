@@ -5,14 +5,41 @@ import { ApiResponse, Post, User, Notification, LoginResponseData, RegisterFormD
 export const authApi = {
   login: async (usernameOrEmail: string, password: string): Promise<ApiResponse<LoginResponseData>> => {
     try {
-      // If the input does not contain '@', treat as username and append @talynk.com
-      const email = usernameOrEmail.includes('@') ? usernameOrEmail : `${usernameOrEmail}@talynk.com`;
-      const response = await apiClient.post('/api/auth/login', { email, password, role: 'user' });
+      // Extract username and email from input
+      let email: string;
+      let username: string | undefined;
+      
+      if (usernameOrEmail.includes('@')) {
+        // Input is an email
+        email = usernameOrEmail;
+        // Extract username from email (part before @)
+        username = email.split('@')[0];
+      } else {
+        // Input is a username, construct email
+        username = usernameOrEmail;
+        email = `${username}@talynk.com`;
+      }
+      
+      // Send both email and username to match Postman request format
+      const response = await apiClient.post('/api/auth/login', { 
+        email, 
+        username, 
+        password, 
+        role: 'user' 
+      });
       return response.data;
     } catch (error: any) {
+      // Enhanced error logging
+      console.error('Login API error:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+        url: error.config?.url
+      });
+      
       return {
         status: 'error',
-        message: error.response?.data?.message || 'Login failed',
+        message: error.response?.data?.message || error.message || 'Login failed',
         data: {} as LoginResponseData,
       };
     }
@@ -112,7 +139,7 @@ export const postsApi = {
 
   getFollowing: async (page = 1, limit = 10, timestamp = ''): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
     try {
-      const response = await apiClient.get(`/api/posts/following?page=${page}&limit=${limit}${timestamp}`);
+      const response = await apiClient.get(`/api/follows/posts?page=${page}&limit=${limit}${timestamp}`);
       return response.data;
     } catch (error: any) {
       return {
@@ -125,12 +152,70 @@ export const postsApi = {
 
   getFeatured: async (page = 1, limit = 10, timestamp = ''): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
     try {
-      const response = await apiClient.get(`/api/posts/featured?page=${page}&limit=${limit}${timestamp}`);
-      return response.data;
+      const response = await apiClient.get(`/api/featured?page=${page}&limit=${limit}${timestamp}`);
+      const apiResponse = response.data;
+      
+      console.log('Raw featured API response:', JSON.stringify(apiResponse, null, 2));
+      
+      // Transform the response: API returns data.featuredPosts array where each item has a 'post' property
+      // API structure: { status: "success", data: { featuredPosts: [...], pagination: {...} } }
+      if (apiResponse?.status === 'success' && apiResponse?.data?.featuredPosts) {
+        // Extract posts from featuredPosts array (each item.post contains the actual post)
+        const featuredPosts = apiResponse.data.featuredPosts;
+        const posts = featuredPosts.map((featuredItem: any) => {
+          // Each featured item has a 'post' property containing the actual post data
+          const post = featuredItem.post || featuredItem;
+          return post;
+        });
+        
+        console.log(`Transformed ${featuredPosts.length} featured posts to ${posts.length} posts`);
+        
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Featured posts fetched successfully',
+          data: {
+            posts,
+            pagination: apiResponse.data.pagination || {},
+            filters: {}
+          }
+        };
+      } else if (apiResponse?.featuredPosts) {
+        // Handle alternative response structure (direct featuredPosts at root)
+        const posts = apiResponse.featuredPosts.map((featuredItem: any) => featuredItem.post || featuredItem);
+        return {
+          status: 'success',
+          message: 'Featured posts fetched successfully',
+          data: {
+            posts,
+            pagination: apiResponse.pagination || {},
+            filters: {}
+          }
+        };
+      }
+      
+      // If response already has posts array, return as-is
+      if (apiResponse?.data?.posts) {
+        return apiResponse;
+      }
+      
+      // Fallback: return empty posts
+      console.warn('Unexpected featured posts response structure:', apiResponse);
+      return {
+        status: 'success',
+        message: 'No featured posts found',
+        data: { posts: [], pagination: {}, filters: {} },
+      };
     } catch (error: any) {
+      console.error('Featured posts API error:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+        url: error.config?.url
+      });
+      
       return {
         status: 'error',
-        message: 'Failed to fetch featured posts',
+        message: error.response?.data?.message || 'Failed to fetch featured posts',
         data: { posts: [], pagination: {}, filters: {} },
       };
     }

@@ -6,7 +6,7 @@
  */
 
 // API URL with fallback for production
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://talynkbackend-8fkrb.sevalla.app';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://213.136.82.225:3000';
 
 // JWT Secret
 export const JWT_SECRET = process.env.JWT_SECRET || 'wUq9wpIDBRGr3n7KDw86GiV15gZlNEEK';
@@ -23,6 +23,6 @@ export const APP_VERSION = '1.0.0';
 
 // Mobile app specific config
 export const MOBILE_APP_ID = 'com.talynk.mobile';
-export const MOBILE_APP_NAME = 'Talynk Social';
+export const MOBILE_APP_NAME = 'Talentix';
 
 // Other config values can be added here 

@@ -446,10 +446,17 @@ export default function FeedScreen() {
       if (response.status === 'success') {
         // Handle nested response structure: data.posts instead of just data
         const posts = response.data.posts || response.data;
-        console.log(`Setting ${posts.length} posts for ${tab} tab`);
-        setPosts(posts);
+        console.log(`Setting ${posts?.length || 0} posts for ${tab} tab`);
+        console.log(`Posts data structure:`, { 
+          hasPosts: !!response.data.posts, 
+          postsLength: posts?.length,
+          firstPost: posts?.[0] 
+        });
+        setPosts(Array.isArray(posts) ? posts : []);
       } else {
         console.error('Failed to load posts:', response.message);
+        console.log('Setting undefined posts for featured tab');
+        setPosts([]);
       }
     } catch (error) {
       console.error('Error loading posts:', error);
