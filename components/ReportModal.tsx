@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,18 +7,23 @@ import {
   Modal,
   ScrollView,
   ActivityIndicator,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { reportsApi } from '../lib/api';
+import { useAuth } from '../lib/auth-context';
 
+// Report reasons matching backend enum
 const REPORT_REASONS = [
-  { id: 'spam', label: 'Spam', description: 'Repetitive or unwanted content' },
-  { id: 'harassment', label: 'Harassment', description: 'Bullying or harassment' },
-  { id: 'hate_speech', label: 'Hate Speech', description: 'Hateful or discriminatory content' },
-  { id: 'violence', label: 'Violence', description: 'Violent or graphic content' },
-  { id: 'nudity', label: 'Nudity', description: 'Sexual or nude content' },
-  { id: 'misinformation', label: 'Misinformation', description: 'False or misleading information' },
-  { id: 'copyright', label: 'Copyright', description: 'Unauthorized use of copyrighted material' },
-  { id: 'other', label: 'Other', description: 'Something else' },
+  { id: 'SPAM', label: 'Spam', description: 'Repetitive or unwanted content' },
+  { id: 'HARASSMENT', label: 'Harassment', description: 'Bullying or harassment' },
+  { id: 'INAPPROPRIATE_CONTENT', label: 'Inappropriate Content', description: 'Content that violates community guidelines' },
+  { id: 'COPYRIGHT_VIOLATION', label: 'Copyright Violation', description: 'Unauthorized use of copyrighted material' },
+  { id: 'FALSE_INFORMATION', label: 'False Information', description: 'Misleading or false information' },
+  { id: 'VIOLENCE', label: 'Violence', description: 'Violent or graphic content' },
+  { id: 'HATE_SPEECH', label: 'Hate Speech', description: 'Hateful or discriminatory content' },
+  { id: 'OTHER', label: 'Other', description: 'Something else (please describe)' },
 ];
 
 interface ReportModalProps {
@@ -30,23 +35,97 @@ interface ReportModalProps {
 
 export default function ReportModal({ isVisible, onClose, postId, onReported }: ReportModalProps) {
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [description, setDescription] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
+  const [alreadyReported, setAlreadyReported] = useState(false);
+  const [checkingReport, setCheckingReport] = useState(false);
+  const { user } = useAuth();
+
+  // Check if user has already reported this post when modal opens
+  useEffect(() => {
+    const checkIfAlreadyReported = async () => {
+      if (!isVisible || !postId || !user) {
+        setAlreadyReported(false);
+        return;
+      }
+      
+      setCheckingReport(true);
+      try {
+        const response = await reportsApi.getPostReports(postId);
+        if (response.status === 'success' && response.data?.reports) {
+          // Check if current user has reported this post
+          const userReports = response.data.reports.filter(
+            (report: any) => report.reporter?.id === user?.id || report.user_id === user?.id
+          );
+          setAlreadyReported(userReports.length > 0);
+        }
+      } catch (error) {
+        console.error('Error checking reports:', error);
+        // Don't set alreadyReported on error, let them try to report
+      } finally {
+        setCheckingReport(false);
+      }
+    };
+
+    checkIfAlreadyReported();
+  }, [isVisible, postId, user]);
 
   const handleSubmit = async () => {
     if (!selectedReason || !postId) return;
     
+    // For "OTHER" reason, require description
+    if (selectedReason === 'OTHER' && !description.trim()) {
+      Alert.alert('Description Required', 'Please provide a description for your report.');
+      return;
+    }
+    
     setSubmitting(true);
     try {
-      // Here you would call your report API
-      // await reportsApi.reportPost(postId, selectedReason);
+      // Use the selected reason directly (all enum values are valid)
+      const apiReason = selectedReason;
       
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Build description: use user's description or default message
+      const reportDescription = description.trim() || 
+        (selectedReason === 'OTHER' ? 'User reported as "other"' : `Reported for: ${selectedReason}`);
       
-      onReported();
-      setSelectedReason(null);
-    } catch (error) {
+      const response = await reportsApi.reportPost(
+        postId,
+        apiReason,
+        reportDescription
+      );
+      
+      if (response.status === 'success') {
+        onReported();
+        setSelectedReason(null);
+        setDescription('');
+      } else {
+        // Handle specific error cases
+        const errorMessage = response.message || 'Failed to submit report. Please try again.';
+        const isAlreadyReported = response.data?.alreadyReported || 
+          errorMessage.toLowerCase().includes('already reported');
+        
+        if (isAlreadyReported) {
+          Alert.alert(
+            'Already Reported',
+            'You have already reported this post. Our team will review it shortly.',
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  setSelectedReason(null);
+                  setDescription('');
+                  onClose();
+                }
+              }
+            ]
+          );
+        } else {
+          Alert.alert('Error', errorMessage);
+        }
+      }
+    } catch (error: any) {
       console.error('Error reporting post:', error);
+      Alert.alert('Error', 'Failed to submit report. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -55,6 +134,8 @@ export default function ReportModal({ isVisible, onClose, postId, onReported }: 
   const handleClose = () => {
     if (submitting) return;
     setSelectedReason(null);
+    setDescription('');
+    setAlreadyReported(false);
     onClose();
   };
 
@@ -78,9 +159,30 @@ export default function ReportModal({ isVisible, onClose, postId, onReported }: 
 
           {/* Content */}
           <ScrollView style={styles.content}>
-            <Text style={styles.subtitle}>
-              Why are you reporting this post?
-            </Text>
+            {checkingReport ? (
+              <View style={styles.checkingContainer}>
+                <ActivityIndicator size="small" color="#60a5fa" />
+                <Text style={styles.checkingText}>Checking...</Text>
+              </View>
+            ) : alreadyReported ? (
+              <View style={styles.alreadyReportedContainer}>
+                <MaterialIcons name="info" size={48} color="#60a5fa" style={styles.infoIcon} />
+                <Text style={styles.alreadyReportedTitle}>Already Reported</Text>
+                <Text style={styles.alreadyReportedText}>
+                  You have already reported this post. Our team will review it shortly.
+                </Text>
+                <TouchableOpacity
+                  style={styles.closeButton}
+                  onPress={handleClose}
+                >
+                  <Text style={styles.closeButtonText}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.subtitle}>
+                  Why are you reporting this post?
+                </Text>
 
             {REPORT_REASONS.map((reason) => (
               <TouchableOpacity
@@ -105,25 +207,49 @@ export default function ReportModal({ isVisible, onClose, postId, onReported }: 
                 </View>
               </TouchableOpacity>
             ))}
+
+            {/* Description input for "OTHER" reason or optional additional details */}
+            {selectedReason && (
+              <View style={styles.descriptionContainer}>
+                <Text style={styles.descriptionLabel}>
+                  {selectedReason === 'OTHER' ? 'Please describe the issue (required)' : 'Additional details (optional)'}
+                </Text>
+                <TextInput
+                  style={styles.descriptionInput}
+                  placeholder="Provide more information about your report..."
+                  placeholderTextColor="#71717a"
+                  value={description}
+                  onChangeText={setDescription}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                  editable={!submitting}
+                />
+              </View>
+            )}
+              </>
+            )}
           </ScrollView>
 
           {/* Footer */}
-          <View style={styles.footer}>
-            <TouchableOpacity
-              style={[
-                styles.submitButton,
-                (!selectedReason || submitting) && styles.submitButtonDisabled
-              ]}
-              onPress={handleSubmit}
-              disabled={!selectedReason || submitting}
-            >
-              {submitting ? (
-                <ActivityIndicator color="#000" />
-              ) : (
-                <Text style={styles.submitButtonText}>Submit Report</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+          {!alreadyReported && !checkingReport && (
+            <View style={styles.footer}>
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  (!selectedReason || submitting || (selectedReason === 'OTHER' && !description.trim())) && styles.submitButtonDisabled
+                ]}
+                onPress={handleSubmit}
+                disabled={!selectedReason || submitting || (selectedReason === 'OTHER' && !description.trim())}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Submit Report</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </View>
     </Modal>
@@ -227,5 +353,70 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 16,
     fontWeight: '600',
+  },
+  descriptionContainer: {
+    marginTop: 16,
+  },
+  descriptionLabel: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  descriptionInput: {
+    backgroundColor: '#232326',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRadius: 12,
+    padding: 12,
+    color: '#fff',
+    fontSize: 14,
+    minHeight: 100,
+    maxHeight: 150,
+  },
+  checkingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  checkingText: {
+    color: '#a1a1aa',
+    fontSize: 16,
+    marginLeft: 12,
+  },
+  alreadyReportedContainer: {
+    alignItems: 'center',
+    padding: 40,
+  },
+  infoIcon: {
+    marginBottom: 16,
+  },
+  alreadyReportedTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  alreadyReportedText: {
+    color: '#a1a1aa',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 24,
+  },
+  closeButton: {
+    backgroundColor: '#60a5fa',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    minWidth: 120,
+  },
+  closeButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

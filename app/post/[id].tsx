@@ -213,18 +213,20 @@ export default function PostDetailScreen() {
 
       {/* Media */}
       <View style={styles.mediaContainer}>
-        {isVideo ? (
-          <Video
-            source={{ uri: mediaUrl }}
-            style={styles.media}
-            resizeMode={ResizeMode.CONTAIN}
-            useNativeControls
-            shouldPlay
-            isLooping
-          />
-        ) : (
-          <Image source={{ uri: mediaUrl }} style={styles.media} resizeMode="contain" />
-        )}
+        <View style={styles.mediaWrapper}>
+          {isVideo ? (
+            <Video
+              source={{ uri: mediaUrl }}
+              style={styles.media}
+              resizeMode={ResizeMode.CONTAIN}
+              useNativeControls
+              shouldPlay
+              isLooping
+            />
+          ) : (
+            <Image source={{ uri: mediaUrl }} style={styles.media} resizeMode="contain" />
+          )}
+        </View>
       </View>
 
       {/* Actions Bar */}
@@ -446,6 +448,17 @@ const styles = StyleSheet.create({
   },
   mediaContainer: {
     flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  mediaWrapper: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#000',
   },
   media: {

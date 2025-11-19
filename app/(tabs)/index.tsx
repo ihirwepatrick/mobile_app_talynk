@@ -235,19 +235,25 @@ const PostItem: React.FC<PostItemProps> = ({
       <View style={styles.mediaContainer}>
         {isVideo ? (
           videoError ? (
-            <Image
-              source={{ uri: mediaUrl }}
-              style={styles.media}
-              resizeMode="cover"
-              onError={() => setImageError(true)}
-            />
+            <View style={styles.mediaWrapper}>
+              <Image
+                source={{ uri: mediaUrl }}
+                style={styles.media}
+                resizeMode="contain"
+                onError={() => setImageError(true)}
+              />
+            </View>
           ) : (
-            <TouchableOpacity style={{ flex: 1, backgroundColor: '#000' }} activeOpacity={1} onPress={handleVideoTap}>
+            <TouchableOpacity 
+              style={styles.mediaWrapper} 
+              activeOpacity={1} 
+              onPress={handleVideoTap}
+            >
               <Video
                 ref={videoRef}
                 source={{ uri: mediaUrl }}
-                style={[styles.media, { backgroundColor: '#000' }]}
-                resizeMode={ResizeMode.COVER}
+                style={styles.media}
+                resizeMode={ResizeMode.CONTAIN}
                 shouldPlay={isActive}
                 isLooping
                 isMuted={isMuted}
@@ -256,7 +262,7 @@ const PostItem: React.FC<PostItemProps> = ({
                 useNativeControls={false}
                 shouldCorrectPitch={true}
                 volume={isMuted ? 0.0 : 1.0}
-                posterStyle={{ resizeMode: 'cover' }}
+                posterStyle={{ resizeMode: 'contain' }}
                 onPlaybackStatusUpdate={(status: any) => {
                   if (status.isLoaded) {
                     setIsPlaying(status.isPlaying);
@@ -266,12 +272,14 @@ const PostItem: React.FC<PostItemProps> = ({
             </TouchableOpacity>
           )
         ) : (
-          <Image
-            source={{ uri: imageError ? 'https://via.placeholder.com/300x500' : mediaUrl }}
-            style={[styles.media, { backgroundColor: '#000' }]}
-            resizeMode="cover"
-            onError={() => setImageError(true)}
-          />
+          <View style={styles.mediaWrapper}>
+            <Image
+              source={{ uri: imageError ? 'https://via.placeholder.com/300x500' : mediaUrl }}
+              style={styles.media}
+              resizeMode="contain"
+              onError={() => setImageError(true)}
+            />
+          </View>
         )}
 
         {/* Mute/Unmute Icon */}
@@ -737,9 +745,19 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
     backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  mediaWrapper: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
   },
   media: {
-    flex: 1,
     width: '100%',
     height: '100%',
     backgroundColor: '#000',

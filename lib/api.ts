@@ -355,13 +355,31 @@ export const postsApi = {
     }
   },
 
-  getComments: async (postId: string) => {
-    const response = await apiClient.get(`/api/posts/${postId}/comments`);
-    return response.data;
+  getComments: async (postId: string): Promise<ApiResponse<{ comments: any[]; pagination?: any }>> => {
+    try {
+      const response = await apiClient.get(`/api/posts/${postId}/comments`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Get comments API error:', error);
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch comments',
+        data: { comments: [], pagination: {} },
+      };
+    }
   },
-  addComment: async (postId: string, content: string) => {
-    const response = await apiClient.post(`/api/posts/${postId}/comments`, { comment_text: content });
-    return response.data;
+  addComment: async (postId: string, content: string): Promise<ApiResponse<{ comment: any }>> => {
+    try {
+      const response = await apiClient.post(`/api/posts/${postId}/comments`, { content });
+      return response.data;
+    } catch (error: any) {
+      console.error('Add comment API error:', error);
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to add comment',
+        data: { comment: null },
+      };
+    }
   },
   deletePost: async (postId: string) => {
     const response = await apiClient.delete(`/api/posts/${postId}`);
@@ -609,6 +627,59 @@ export const likesApi = {
         message: error.response?.data?.message || 'Failed to toggle like',
         data: { isLiked: false, likeCount: 0 },
       } as any;
+    }
+  },
+};
+
+// Reports API (per API_DOC)
+export const reportsApi = {
+  // Report a post
+  reportPost: async (postId: string, reason: string, description?: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.post(`/api/reports/posts/${postId}`, {
+        reason,
+        description: description || `Reported for: ${reason}`,
+      });
+      return response.data;
+    } catch (error: any) {
+      // Extract error message from different possible response structures
+      const errorMessage = 
+        error.response?.data?.data?.message || 
+        error.response?.data?.message || 
+        error.message || 
+        'Failed to report post';
+      
+      const isAlreadyReported = errorMessage.toLowerCase().includes('already reported');
+      
+      console.error('Report post API error:', {
+        message: errorMessage,
+        status: error.response?.status,
+        data: error.response?.data,
+        url: error.config?.url,
+        isAlreadyReported
+      });
+      
+      return {
+        status: 'error',
+        message: errorMessage,
+        data: {
+          alreadyReported: isAlreadyReported,
+        },
+      };
+    }
+  },
+
+  // Get reports for a specific post (for users to see if they've already reported)
+  getPostReports: async (postId: string): Promise<ApiResponse<{ reports: any[] }>> => {
+    try {
+      const response = await apiClient.get(`/api/reports/posts/${postId}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch post reports',
+        data: { reports: [] },
+      };
     }
   },
 };
