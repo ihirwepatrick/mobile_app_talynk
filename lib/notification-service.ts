@@ -29,10 +29,13 @@ export class UploadNotificationService {
   }
 
   async showUploadProgress(progress: number, filename?: string): Promise<void> {
+    // Cap progress at 100%
+    const cappedProgress = Math.min(Math.max(progress, 0), 100);
+    
     const title = 'Uploading Video';
     const body = filename 
-      ? `Uploading ${filename}... ${progress}%`
-      : `Uploading... ${progress}%`;
+      ? `Uploading ${filename}... ${cappedProgress}%`
+      : `Uploading... ${cappedProgress}%`;
 
     if (this.notificationId) {
       // Update existing notification
@@ -41,7 +44,7 @@ export class UploadNotificationService {
         content: {
           title,
           body,
-          data: { progress, type: 'upload-progress' },
+          data: { progress: cappedProgress, type: 'upload-progress' },
         },
         trigger: null, // Immediate
       });
@@ -51,7 +54,7 @@ export class UploadNotificationService {
         content: {
           title,
           body,
-          data: { progress, type: 'upload-progress' },
+          data: { progress: cappedProgress, type: 'upload-progress' },
         },
         trigger: null, // Immediate
       });

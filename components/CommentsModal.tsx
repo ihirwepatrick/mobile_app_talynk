@@ -88,15 +88,17 @@ export default function CommentsModal({
   const panY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    console.log('CommentsModal useEffect - visible:', visible, 'postId:', postId);
     if (visible && postId) {
+      console.log('Fetching comments for postId:', postId);
       fetchComments();
       // Reset to collapsed state when opened
       setIsExpanded(false);
-      slideAnim.setValue(INITIAL_HEIGHT);
+      slideAnim.setValue(EXPANDED_HEIGHT - INITIAL_HEIGHT); // Start translated up (collapsed)
     } else {
       // Reset when closed
       setIsExpanded(false);
-      slideAnim.setValue(INITIAL_HEIGHT);
+      slideAnim.setValue(EXPANDED_HEIGHT - INITIAL_HEIGHT);
     }
   }, [visible, postId]);
 
@@ -135,8 +137,8 @@ export default function CommentsModal({
   const expandOverlay = () => {
     setIsExpanded(true);
     Animated.spring(slideAnim, {
-      toValue: EXPANDED_HEIGHT,
-      useNativeDriver: false,
+      toValue: 0, // Use translateY instead of height
+      useNativeDriver: true, // Can use native driver with translateY
       tension: 50,
       friction: 8,
     }).start();
@@ -146,8 +148,8 @@ export default function CommentsModal({
   const collapseOverlay = () => {
     setIsExpanded(false);
     Animated.spring(slideAnim, {
-      toValue: INITIAL_HEIGHT,
-      useNativeDriver: false,
+      toValue: EXPANDED_HEIGHT - INITIAL_HEIGHT, // Translate up to show collapsed
+      useNativeDriver: true,
       tension: 50,
       friction: 8,
     }).start();
@@ -155,12 +157,20 @@ export default function CommentsModal({
   };
 
   const fetchComments = async () => {
+    if (!postId) {
+      console.warn('fetchComments called without postId');
+      return;
+    }
     try {
       setLoading(true);
+      console.log('Calling postsApi.getComments with postId:', postId);
       const response = await postsApi.getComments(postId);
+      console.log('Comments API response:', response);
       if (response.status === 'success' && response.data?.comments) {
         setComments(response.data.comments);
+        console.log('Comments loaded:', response.data.comments.length);
       } else {
+        console.log('No comments in response or error status');
         setComments([]);
       }
     } catch (error) {
@@ -241,12 +251,17 @@ export default function CommentsModal({
   const initialComments = comments.slice(0, 2);
   const hasMoreComments = comments.length > 2;
 
+  if (!visible || !postId) {
+    return null;
+  }
+
   return (
     <Modal
       visible={visible}
       transparent
-      animationType="none"
+      animationType="slide"
       onRequestClose={onClose}
+      statusBarTranslucent
     >
       {/* Backdrop */}
       <TouchableOpacity 
@@ -257,15 +272,17 @@ export default function CommentsModal({
       
       <KeyboardAvoidingView 
         style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <Animated.View
           style={[
             styles.overlayContainer,
             {
-              height: slideAnim,
-              transform: [{ translateY: panY }],
+              height: isExpanded ? EXPANDED_HEIGHT : INITIAL_HEIGHT,
+              transform: [
+                { translateY: Animated.add(slideAnim, panY) }
+              ],
             },
           ]}
           {...panResponder.panHandlers}
@@ -385,9 +402,9 @@ export default function CommentsModal({
                 disabled={!commentText.trim() || submitting}
               >
                 {submitting ? (
-                  <ActivityIndicator size="small" color="#60a5fa" />
+                  <ActivityIndicator size="small" color="#000" />
                 ) : (
-                  <Feather name="send" size={20} color="#60a5fa" />
+                  <Feather name="send" size={18} color="#000" />
                 )}
               </TouchableOpacity>
             </View>
@@ -408,13 +425,11 @@ export default function CommentsModal({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   keyboardView: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    flex: 1,
+    justifyContent: 'flex-end',
   },
   overlayContainer: {
     backgroundColor: '#18181b',
@@ -422,17 +437,31 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     overflow: 'hidden',
     maxHeight: EXPANDED_HEIGHT,
+    minHeight: INITIAL_HEIGHT,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: -2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   dragHandleContainer: {
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 10,
     position: 'relative',
+    backgroundColor: '#18181b',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
   },
   dragHandle: {
     width: 40,
     height: 4,
     backgroundColor: '#666',
     borderRadius: 2,
+    marginTop: 4,
   },
   expandButton: {
     position: 'absolute',
@@ -445,9 +474,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#27272a',
+    backgroundColor: '#18181b',
   },
   headerTitle: {
     color: '#fff',
@@ -459,24 +489,29 @@ const styles = StyleSheet.create({
   },
   commentsList: {
     flex: 1,
+    minHeight: 200,
   },
   commentsContent: {
     padding: 16,
+    flexGrow: 1,
   },
   collapsedComments: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    maxHeight: 120,
+    maxHeight: 150,
+    flexGrow: 0,
   },
   commentItem: {
     flexDirection: 'row',
-    marginBottom: 12,
+    marginBottom: 16,
+    paddingVertical: 4,
   },
   commentAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginRight: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 12,
+    backgroundColor: '#27272a',
   },
   commentContent: {
     flex: 1,
@@ -547,15 +582,18 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 16,
     paddingTop: 12,
+    paddingBottom: 8,
     borderTopWidth: 1,
     borderTopColor: '#27272a',
     backgroundColor: '#18181b',
+    minHeight: 60,
   },
   inputAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginRight: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 12,
+    backgroundColor: '#27272a',
   },
   commentInput: {
     flex: 1,
@@ -571,12 +609,13 @@ const styles = StyleSheet.create({
     borderColor: '#27272a',
   },
   sendButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#232326',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#60a5fa',
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 2,
   },
   loginPrompt: {
     paddingHorizontal: 16,

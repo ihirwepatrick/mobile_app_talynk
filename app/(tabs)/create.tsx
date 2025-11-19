@@ -26,6 +26,7 @@ import { uploadNotificationService } from '@/lib/notification-service';
 import { categoriesApi } from '@/lib/api';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/lib/auth-context';
+import { API_BASE_URL } from '@/lib/config';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -140,7 +141,7 @@ const COLORS = {
 };
 
 export default function CreatePostScreen() {
-  const { isAuthenticated, loading: authLoading, user } = useAuth();
+  const { isAuthenticated, loading: authLoading, user, token } = useAuth();
   const [title, setTitle] = useState('');
   const [caption, setCaption] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
@@ -424,22 +425,49 @@ export default function CreatePostScreen() {
       }
       
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${process.env.EXPO_PUBLIC_API_URL || 'https://talynkbackend-8fkrb.sevalla.app'}/api/posts`);
+      // Use the same API URL as apiClient
+      const apiUrl = `${API_BASE_URL}/api/posts`;
+      
+      console.log('Creating post request to:', apiUrl);
+      
+      xhr.open('POST', apiUrl);
       xhr.setRequestHeader('Accept', 'application/json');
       
-      const token = await AsyncStorage.getItem('talynk_token');
-      if (token) {
-        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      // Get token from AsyncStorage (same way apiClient does it)
+      // This ensures consistency with other API calls
+      const authToken = await AsyncStorage.getItem('talynk_token');
+      
+      if (!authToken) {
+        console.error('No token found in AsyncStorage');
+        setUploading(false);
+        setUploadProgress(0);
+        setProgress(0);
+        Alert.alert('Authentication Error', 'Please login again to create posts.');
+        router.push('/auth/login');
+        return;
       }
+      
+      // Clean token (remove any whitespace)
+      const cleanToken = authToken.trim();
+      
+      console.log('Token retrieved, length:', cleanToken.length);
+      console.log('Token preview:', cleanToken.substring(0, 30) + '...');
+      console.log('User from auth context:', user?.id, user?.username);
+      
+      // Set Authorization header exactly like apiClient does
+      xhr.setRequestHeader('Authorization', `Bearer ${cleanToken}`);
+      
+      console.log('Request configured with Authorization header');
       
       let lastLoggedPercent = -10;
       xhr.upload.onprogress = async (event) => {
         if (event.lengthComputable) {
-          const percent = Math.round((event.loaded / event.total) * 100);
+          // Cap progress at 100%
+          const percent = Math.min(Math.round((event.loaded / event.total) * 100), 100);
           setUploadProgress(percent);
           setProgress(percent);
           
-          // Update notification with progress
+          // Update notification with progress (capped at 100%)
           await uploadNotificationService.showUploadProgress(percent, selectedMedia?.name);
           
           if (percent - lastLoggedPercent >= 10 || percent === 100) {
@@ -454,10 +482,42 @@ export default function CreatePostScreen() {
         setUploadProgress(0);
         setProgress(0);
         
+        // Handle 401 Unauthorized - token expired or invalid
+        if (xhr.status === 401) {
+          let errorMessage = 'Authentication failed.';
+          try {
+            const errorResponse = JSON.parse(xhr.responseText);
+            errorMessage = errorResponse.message || errorResponse.data?.message || errorMessage;
+            console.error('401 Error Response:', errorResponse);
+          } catch (e) {
+            console.error('401 Error - Could not parse response:', xhr.responseText);
+          }
+          
+          console.error('401 Unauthorized Details:', {
+            status: xhr.status,
+            statusText: xhr.statusText,
+            responseText: xhr.responseText,
+            allResponseHeaders: xhr.getAllResponseHeaders(),
+          });
+          
+          await uploadNotificationService.showUploadError('Authentication failed. Please login again.', selectedMedia?.name);
+          Alert.alert(
+            'Authentication Error',
+            errorMessage + ' Please login again to create posts.',
+            [
+              {
+                text: 'Login',
+                onPress: () => router.push('/auth/login')
+              }
+            ]
+          );
+          return;
+        }
+        
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const response = JSON.parse(xhr.responseText);
-      if (response.status === 'success') {
+            if (response.status === 'success') {
               // Show success notification
               await uploadNotificationService.showUploadComplete(selectedMedia?.name);
               
@@ -470,15 +530,14 @@ export default function CreatePostScreen() {
                     onPress: () => {
                       // Navigate to profile with pending tab selected
                       router.replace('/(tabs)/profile');
-                      // You might want to add a way to automatically select the pending tab
                     }
                   }
                 ]
               );
-      } else {
+            } else {
               await uploadNotificationService.showUploadError(response.message || 'Failed to create post', selectedMedia?.name);
-        Alert.alert('Error', response.message || 'Failed to create post');
-      }
+              Alert.alert('Error', response.message || 'Failed to create post');
+            }
           } catch (e) {
             await uploadNotificationService.showUploadError('Failed to parse server response', selectedMedia?.name);
             Alert.alert('Error', 'Failed to parse server response.');
@@ -547,7 +606,7 @@ export default function CreatePostScreen() {
           </View>
         </View>
         <Text style={[styles.progressText, { color: C.text }]}>
-          Uploading... {Math.round(uploadProgress)}%
+          Uploading... {Math.min(Math.round(uploadProgress), 100)}%
         </Text>
       </Animated.View>
     );
@@ -785,6 +844,26 @@ export default function CreatePostScreen() {
             </View>
             {errors.media && <Text style={[styles.errorText, { color: C.error }]}>{errors.media}</Text>}
         </View>
+
+        {/* Upload Progress Indicator Above Button */}
+        {uploading && (
+          <View style={[styles.uploadProgressContainer, { backgroundColor: C.card, borderColor: C.border }]}>
+            <View style={styles.uploadProgressBarContainer}>
+              <View 
+                style={[
+                  styles.uploadProgressBar, 
+                  { 
+                    width: `${Math.min(Math.max(uploadProgress, 0), 100)}%`,
+                    backgroundColor: C.primary 
+                  }
+                ]} 
+              />
+            </View>
+            <Text style={[styles.uploadProgressText, { color: C.text }]}>
+              Uploading... {Math.min(Math.round(uploadProgress), 100)}%
+            </Text>
+          </View>
+        )}
 
         {/* Submit Button */}
         <TouchableOpacity
@@ -1041,6 +1120,28 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     top: 0,
+  },
+  uploadProgressContainer: {
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  uploadProgressBarContainer: {
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  uploadProgressBar: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  uploadProgressText: {
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   progressText: {
     fontSize: 12,

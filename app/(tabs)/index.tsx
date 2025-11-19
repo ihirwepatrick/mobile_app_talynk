@@ -70,7 +70,8 @@ const timeAgo = (date: string): string => {
 };
 
 const getMediaUrl = (post: Post): string => {
-  let url = post.video_url || post.image || '';
+  // Check for fullUrl first (from API response), then video_url/image, then imageUrl
+  let url = (post as any).fullUrl || post.video_url || post.image || post.imageUrl || '';
   if (!url) return 'https://via.placeholder.com/300x500';
   return url;
 };
@@ -87,6 +88,7 @@ interface PostItemProps {
   isLiked: boolean;
   isFollowing: boolean;
   isActive: boolean;
+  availableHeight: number;
 }
 
 const PostItem: React.FC<PostItemProps> = ({ 
@@ -100,7 +102,8 @@ const PostItem: React.FC<PostItemProps> = ({
   onUnfollow,
   isLiked, 
   isFollowing,
-  isActive
+  isActive,
+  availableHeight
 }) => {
   const { user } = useAuth();
   const { sendLikeAction } = useRealtime();
@@ -117,23 +120,54 @@ const PostItem: React.FC<PostItemProps> = ({
   const [videoError, setVideoError] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [useNativeControls, setUseNativeControls] = useState(false);
+  const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
   const insets = useSafeAreaInsets();
   
   // Like animation
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
 
-  // Handle video play/pause based on active state
+  // Handle video play/pause based on active state - improved with status checking
   useEffect(() => {
-    if (videoRef.current && videoLoaded) {
-      if (isActive) {
-        videoRef.current.playAsync().catch(console.log);
-      } else {
-        videoRef.current.pauseAsync().catch(console.log);
-        setIsPlaying(false);
+    if (!videoRef.current || useNativeControls) return;
+    
+    const managePlayback = async () => {
+      try {
+        if (isActive) {
+          // Try to play - don't wait for videoLoaded
+          const status = await videoRef.current?.getStatusAsync();
+          if (status && status.isLoaded && !status.isPlaying) {
+            await videoRef.current?.playAsync();
+          } else if (!status || !status.isLoaded) {
+            // Video not loaded yet, but shouldPlay prop will handle it
+            console.log('Video not loaded yet, waiting for shouldPlay');
+          }
+        } else {
+          // Pause if playing
+          const status = await videoRef.current?.getStatusAsync();
+          if (status && status.isLoaded && status.isPlaying) {
+            await videoRef.current?.pauseAsync();
+            setIsPlaying(false);
+          }
+        }
+      } catch (error) {
+        // Silently handle playback errors
+        console.log('Playback management error:', error);
       }
-    }
-  }, [isActive, videoLoaded]);
+    };
+    
+    managePlayback();
+  }, [isActive, useNativeControls]);
+
+  // Cleanup video on unmount
+  useEffect(() => {
+    return () => {
+      if (videoRef.current) {
+        videoRef.current.unloadAsync().catch(() => {});
+      }
+    };
+  }, []);
 
   const handleVideoTap = () => {
     setIsMuted(!isMuted);
@@ -145,10 +179,15 @@ const PostItem: React.FC<PostItemProps> = ({
       return;
     }
     
+    // Prevent double clicks and rapid toggling
     if (isLiking) return;
     setIsLiking(true);
     
-    const newIsLiked = !realtimeIsLiked;
+    // Get current like state
+    const currentIsLiked = realtimeIsLiked;
+    const newIsLiked = !currentIsLiked;
+    
+    // Optimistic update
     const newLikeCount = newIsLiked ? likes + 1 : Math.max(0, likes - 1);
     updateLikesLocally(newLikeCount, newIsLiked);
     
@@ -181,9 +220,19 @@ const PostItem: React.FC<PostItemProps> = ({
       ]).start();
     }
     
-      sendLikeAction(item.id, newIsLiked);
-    await onLike(item.id);
-    setIsLiking(false);
+    // Send realtime update
+    sendLikeAction(item.id, newIsLiked);
+    
+    // Call API to toggle like
+    try {
+      await onLike(item.id);
+    } catch (error) {
+      // Revert on error
+      updateLikesLocally(likes, currentIsLiked);
+      console.error('Like error:', error);
+    } finally {
+      setIsLiking(false);
+    }
   };
 
   const handleFollow = () => {
@@ -200,11 +249,10 @@ const PostItem: React.FC<PostItemProps> = ({
   };
 
   const handleComment = () => {
-    if (!user) {
-      router.push('/auth/login');
-      return;
+    // Allow viewing comments even if not logged in
+    if (onComment) {
+      onComment(item.id);
     }
-    onComment(item.id);
   };
 
   const handleUserPress = () => {
@@ -227,20 +275,43 @@ const PostItem: React.FC<PostItemProps> = ({
   };
 
   const mediaUrl = getMediaUrl(item);
-  const isVideo = !!item.video_url;
+  // Check if it's a video: use type field, video_url, or fullUrl extension
+  const isVideo = item.type === 'video' || !!item.video_url || 
+    (mediaUrl && (mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm')));
+  
+  // Debug logging for media URL
+  if (!mediaUrl || mediaUrl === 'https://via.placeholder.com/300x500') {
+    console.warn('Post has no valid media URL:', {
+      id: item.id,
+      video_url: item.video_url,
+      image: item.image,
+      fullUrl: (item as any).fullUrl,
+      type: item.type
+    });
+  } else if (isVideo) {
+    console.log('Video post detected:', {
+      id: item.id,
+      mediaUrl: mediaUrl.substring(0, 60) + '...',
+      isActive,
+      useNativeControls: useNativeControls
+    });
+  }
 
   return (
-    <View style={styles.postContainer}>
+    <View style={[styles.postContainer, { height: availableHeight }]}>
       {/* Media */}
-      <View style={styles.mediaContainer}>
+      <View style={[styles.mediaContainer, { height: availableHeight }]}>
         {isVideo ? (
           videoError ? (
             <View style={styles.mediaWrapper}>
               <Image
-                source={{ uri: mediaUrl }}
+                source={{ uri: mediaUrl || 'https://via.placeholder.com/300x500' }}
                 style={styles.media}
                 resizeMode="contain"
-                onError={() => setImageError(true)}
+                onError={(error) => {
+                  console.error('Video error fallback image failed:', error, 'URL:', mediaUrl);
+                  setImageError(true);
+                }}
               />
             </View>
           ) : (
@@ -253,19 +324,49 @@ const PostItem: React.FC<PostItemProps> = ({
                 ref={videoRef}
                 source={{ uri: mediaUrl }}
                 style={styles.media}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={isActive}
-                isLooping
-                isMuted={isMuted}
-                onLoad={() => setVideoLoaded(true)}
-                onError={() => setVideoError(true)}
-                useNativeControls={false}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay={useNativeControls ? false : (isActive && !decoderErrorDetected)}
+                isLooping={!useNativeControls}
+                isMuted={useNativeControls ? false : isMuted}
+                usePoster={false}
                 shouldCorrectPitch={true}
-                volume={isMuted ? 0.0 : 1.0}
-                posterStyle={{ resizeMode: 'contain' }}
+                volume={useNativeControls ? 1.0 : (isMuted ? 0.0 : 1.0)}
+                onLoad={() => {
+                  console.log('Video loaded successfully:', item.id, mediaUrl);
+                  setVideoLoaded(true);
+                  // Auto-play if active
+                  if (isActive && !useNativeControls) {
+                    videoRef.current?.playAsync().catch(console.log);
+                  }
+                }}
+                onError={(error: any) => {
+                  // Only log error if we haven't already detected decoder error
+                  if (!decoderErrorDetected) {
+                    const errorMessage = error?.message || error?.toString() || '';
+                    console.log('Video error for post:', item.id, errorMessage);
+                    if (errorMessage.includes('Decoder') || errorMessage.includes('decoder') || errorMessage.includes('OMX')) {
+                      // Decoder error - switch to native controls silently
+                      console.log('Switching to native controls for post:', item.id);
+                      setDecoderErrorDetected(true);
+                      setUseNativeControls(true);
+                      setVideoError(false);
+                      setVideoLoaded(true); // Mark as loaded so native controls can work
+                    } else {
+                      console.error('Non-decoder video error:', error);
+                      setVideoError(true);
+                    }
+                  }
+                }}
+                useNativeControls={useNativeControls}
                 onPlaybackStatusUpdate={(status: any) => {
                   if (status.isLoaded) {
-                    setIsPlaying(status.isPlaying);
+                    if (!useNativeControls) {
+                      setIsPlaying(status.isPlaying);
+                    }
+                    // If video loaded but not playing and should be active, try to play
+                    if (isActive && !status.isPlaying && !useNativeControls && videoLoaded) {
+                      videoRef.current?.playAsync().catch(console.log);
+                    }
                   }
                 }}
               />
@@ -276,24 +377,30 @@ const PostItem: React.FC<PostItemProps> = ({
             <Image
               source={{ uri: imageError ? 'https://via.placeholder.com/300x500' : mediaUrl }}
               style={styles.media}
-              resizeMode="contain"
-              onError={() => setImageError(true)}
+              resizeMode="cover"
+              onError={(error) => {
+                console.error('Image load error:', error, 'URL:', mediaUrl);
+                setImageError(true);
+              }}
+              onLoad={() => {
+                console.log('Image loaded successfully:', mediaUrl);
+              }}
             />
           </View>
         )}
 
-        {/* Mute/Unmute Icon */}
-        {isVideo && (
+        {/* Mute/Unmute Icon - only show when not using native controls */}
+        {isVideo && !useNativeControls && (
           <TouchableOpacity 
-            style={[styles.muteButton, { top: insets.top + 60 }]} 
+            style={styles.muteButton} 
             onPress={() => setIsMuted(!isMuted)}
           >
             <Feather name={isMuted ? 'volume-x' : 'volume-2'} size={24} color="#fff" />
           </TouchableOpacity>
         )}
 
-        {/* Right Side Actions */}
-        <View style={[styles.rightActions, { bottom: 120 + insets.bottom }]}>
+        {/* Right Side Actions - TikTok style, positioned lower */}
+        <View style={[styles.rightActions, { bottom: -20 + insets.bottom }]}>
           {/* User Avatar */}
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
             <Image 
@@ -319,7 +426,7 @@ const PostItem: React.FC<PostItemProps> = ({
             <Animated.View style={{ transform: [{ scale: likeScale }] }}>
               <Feather 
                 name="heart" 
-                size={32} 
+                size={24} 
                 color={realtimeIsLiked ? "#ff2d55" : "#fff"} 
                 fill={realtimeIsLiked ? "#ff2d55" : "none"}
               />
@@ -339,39 +446,42 @@ const PostItem: React.FC<PostItemProps> = ({
 
           {/* Comment Button */}
           <TouchableOpacity style={styles.actionButton} onPress={handleComment}>
-            <Feather name="message-circle" size={32} color="#fff" />
+            <Feather name="message-circle" size={24} color="#fff" />
             <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
           </TouchableOpacity>
 
           {/* Share Button */}
           <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
-            <Feather name="share" size={32} color="#fff" />
+            <Feather name="share" size={24} color="#fff" />
           </TouchableOpacity>
 
           {/* More Actions */}
           <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
-            <Feather name="more-horizontal" size={32} color="#fff" />
+            <Feather name="more-horizontal" size={24} color="#fff" />
           </TouchableOpacity>
-                </View>
+        </View>
 
-        {/* Bottom Info */}
-        <View style={[styles.bottomInfo, { paddingBottom: 120 + insets.bottom }]}>
+        {/* Bottom Info - positioned lower */}
+        <View style={[styles.bottomInfo, { bottom: -20 + insets.bottom }]}>
           <View style={styles.bottomInfoContent}>
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
-          </TouchableOpacity>
+            </TouchableOpacity>
             
             <Text style={styles.caption} numberOfLines={3}>
-              {item.description || item.caption || item.title || ''}
+              {item.title}
             </Text>
-        </View>
+            <Text style={styles.caption} numberOfLines={3}>
+              {item.description}
+            </Text>
+          </View>
 
           {/* Category Badge */}
-              {item.category && (
+          {item.category && (
             <TouchableOpacity style={styles.categoryBadge} onPress={handleCategoryPress}>
-                  <Text style={styles.categoryText}>
+              <Text style={styles.categoryText}>
                 #{typeof item.category === 'string' ? item.category : item.category.name}
-                  </Text>
+              </Text>
             </TouchableOpacity>
           )}
 
@@ -415,6 +525,15 @@ export default function FeedScreen() {
   const { user } = useAuth();
   const { likedPosts, followedUsers, updateLikedPosts, updateFollowedUsers } = useCache();
   const insets = useSafeAreaInsets();
+  
+  // Calculate available height for posts (screen height - header - bottom navbar)
+  // Header: insets.top (safe area) + ~50px (tabs content) + 8px (paddingBottom)
+  // Bottom navbar: 60px + insets.bottom
+  const headerContentHeight = 50; // Tabs container height
+  const headerPaddingBottom = 8;
+  const headerHeight = insets.top + headerContentHeight + headerPaddingBottom;
+  const bottomNavHeight = 60 + insets.bottom; // Bottom navbar height
+  const availableHeight = screenHeight - headerHeight - bottomNavHeight;
 
   const loadPosts = async (tab = 'featured', refresh = false) => {
     try {
@@ -497,15 +616,36 @@ export default function FeedScreen() {
   };
 
   const handleLike = async (postId: string) => {
+    if (!user) {
+      return;
+    }
+    
     const isCurrentlyLiked = likedPosts.has(postId);
+    
+    // Optimistic update
     updateLikedPosts(postId, !isCurrentlyLiked);
+    
     try {
       const response = await likesApi.toggle(postId);
-      if (response.status !== 'success') {
+      
+      if (response.status === 'success' && response.data) {
+        // Update with server response to ensure consistency
+        const serverIsLiked = response.data.isLiked;
+        const serverLikeCount = response.data.likeCount;
+        
+        // Only update if different from optimistic update
+        if (serverIsLiked !== !isCurrentlyLiked) {
+          updateLikedPosts(postId, serverIsLiked);
+        }
+      } else {
+        // Revert on error
         updateLikedPosts(postId, isCurrentlyLiked);
+        console.error('Like toggle failed:', response.message);
       }
-    } catch (error) {
+    } catch (error: any) {
+      // Revert on error
       updateLikedPosts(postId, isCurrentlyLiked);
+      console.error('Like API error:', error);
     }
   };
 
@@ -528,12 +668,16 @@ export default function FeedScreen() {
   };
 
   const handleComment = (postId: string) => {
+    console.log('handleComment called with postId:', postId);
     const post = posts.find(p => p.id === postId);
     if (post) {
+      console.log('Post found, opening comment modal');
       setCommentsPostId(postId);
-      setCommentsPostTitle(post.title || '');
+      setCommentsPostTitle(post.title || post.description || '');
       setCommentsPostAuthor(post.user?.username || '');
       setCommentsModalVisible(true);
+    } else {
+      console.log('Post not found for postId:', postId);
     }
   };
 
@@ -563,7 +707,10 @@ export default function FeedScreen() {
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems.length > 0) {
-      setCurrentIndex(viewableItems[0].index || 0);
+      const visibleItem = viewableItems[0];
+      const newIndex = visibleItem.index || 0;
+      console.log('Viewable item changed - index:', newIndex, 'postId:', visibleItem.item?.id);
+      setCurrentIndex(newIndex);
     }
   }).current;
 
@@ -631,14 +778,21 @@ export default function FeedScreen() {
               isLiked={likedPosts.has(item.id)}
               isFollowing={followedUsers.has(item.user?.id || '')}
               isActive={currentIndex === index}
+              availableHeight={availableHeight}
             />
           )}
           keyExtractor={(item) => item.id}
           pagingEnabled
           showsVerticalScrollIndicator={false}
-          snapToInterval={screenHeight}
+          snapToInterval={availableHeight}
           snapToAlignment="start"
           decelerationRate="fast"
+          style={{ marginTop: headerHeight }}
+          contentContainerStyle={{ paddingBottom: 0 }}
+          windowSize={4}
+          initialNumToRender={2}
+          maxToRenderPerBatch={2}
+          removeClippedSubviews={true}
           refreshControl={
             <RefreshControl 
               refreshing={refreshing} 
@@ -676,8 +830,11 @@ export default function FeedScreen() {
 
       {/* Comments Modal */}
       <CommentsModal
-        visible={commentsModalVisible}
-        onClose={() => setCommentsModalVisible(false)}
+        visible={commentsModalVisible && !!commentsPostId}
+        onClose={() => {
+          setCommentsModalVisible(false);
+          setCommentsPostId(null);
+        }}
         postId={commentsPostId || ''}
         postTitle={commentsPostTitle}
         postAuthor={commentsPostAuthor}
@@ -738,11 +895,10 @@ const styles = StyleSheet.create({
   },
   postContainer: {
     width: screenWidth,
-    height: screenHeight,
     backgroundColor: '#000',
   },
   mediaContainer: {
-    flex: 1,
+    width: screenWidth,
     position: 'relative',
     backgroundColor: '#000',
     justifyContent: 'center',
@@ -750,7 +906,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   mediaWrapper: {
-    flex: 1,
     width: '100%',
     height: '100%',
     justifyContent: 'center',
@@ -764,8 +919,9 @@ const styles = StyleSheet.create({
   },
   muteButton: {
     position: 'absolute',
-    right: 16,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    top: 24,
+    right: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)',
     borderRadius: 20,
     padding: 8,
     zIndex: 10,
@@ -778,12 +934,12 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     position: 'relative',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   userAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 2,
     borderColor: '#fff',
   },
@@ -800,13 +956,17 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
+    minWidth: 40,
   },
   actionCount: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     marginTop: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   likeAnimationOverlay: {
     position: 'absolute',

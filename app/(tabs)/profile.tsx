@@ -223,6 +223,7 @@ export default function ProfileScreen() {
           resetVideoState();
           setPostModalVisible(true);
         }}
+        activeOpacity={0.8}
       >
         {isVideo ? (
           <Video
@@ -235,13 +236,17 @@ export default function ProfileScreen() {
             posterStyle={{ resizeMode: 'cover' }}
           />
         ) : (
-          <Image source={{ uri: mediaUrl }} style={styles.postMedia} />
+          <Image 
+            source={{ uri: mediaUrl }} 
+            style={styles.postMedia}
+            resizeMode="cover"
+          />
         )}
         
         <View style={styles.postOverlay}>
           <View style={styles.postStats}>
-            <Feather name="heart" size={14} color="#fff" />
-            <Text style={styles.postStatText}>{item.likes || 0}</Text>
+            <Feather name="heart" size={12} color="#fff" />
+            <Text style={styles.postStatText}>{formatNumber(item.likes || 0)}</Text>
           </View>
           
           {/* Status indicator */}
@@ -251,13 +256,30 @@ export default function ProfileScreen() {
           ]}>
             <MaterialIcons 
               name={getStatusIcon(item.status || 'approved')} 
-              size={12} 
+              size={10} 
               color="#fff" 
             />
           </View>
         </View>
+        
+        {/* Video play indicator */}
+        {isVideo && (
+          <View style={styles.videoPlayIndicator}>
+            <Feather name="play" size={16} color="#fff" />
+          </View>
+        )}
       </TouchableOpacity>
     );
+  };
+  
+  const formatNumber = (num: number): string => {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+    }
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+    }
+    return num.toString();
   };
 
   const getStatusColor = (status: string) => {
@@ -764,13 +786,17 @@ const styles = StyleSheet.create({
   },
   postItem: {
     width: (screenWidth - 6) / 3,
-    height: (screenWidth - 6) / 3 * 1.5,
+    aspectRatio: 0.75, // 3:4 aspect ratio for better previews
     margin: 1,
     position: 'relative',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 2,
+    overflow: 'hidden',
   },
   postMedia: {
     width: '100%',
     height: '100%',
+    backgroundColor: '#1a1a1a',
   },
   postOverlay: {
     position: 'absolute',
@@ -789,13 +815,24 @@ const styles = StyleSheet.create({
   },
   postStatText: {
     color: '#fff',
-    fontSize: 12,
-    marginLeft: 4,
+    fontSize: 10,
+    marginLeft: 3,
+    fontWeight: '600',
   },
   statusIndicator: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoPlayIndicator: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 12,
+    padding: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },

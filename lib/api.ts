@@ -622,9 +622,29 @@ export const likesApi = {
       const response = await apiClient.post(`/api/likes/posts/${postId}/toggle`);
       return response.data;
     } catch (error: any) {
+      console.error('Toggle like API error:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+        url: error.config?.url
+      });
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to toggle like',
+        data: { isLiked: false, likeCount: 0 },
+      } as any;
+    }
+  },
+  
+  getStatus: async (postId: string): Promise<ApiResponse<{ isLiked: boolean; likeCount: number }>> => {
+    try {
+      const response = await apiClient.get(`/api/likes/posts/${postId}/status`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Get like status API error:', error);
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to get like status',
         data: { isLiked: false, likeCount: 0 },
       } as any;
     }
