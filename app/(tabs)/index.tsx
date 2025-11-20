@@ -773,24 +773,22 @@ export default function FeedScreen() {
 
   const handleLike = async (postId: string) => {
     if (!user) {
+      Alert.alert(
+        'Login Required',
+        'Please log in to like posts.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Login', onPress: () => router.push('/auth/login') }
+        ]
+      );
       return;
     }
+
+    // Use efficient likes manager for optimistic updates
+    await likesManager.toggleLike(postId);
     
-    const isCurrentlyLiked = likedPosts.includes(postId);
-    const currentLikeCount = postLikeCounts[postId] || 0;
-    
-    // Optimistic update - update Redux immediately
-    const newIsLiked = !isCurrentlyLiked;
-    const newLikeCount = newIsLiked ? currentLikeCount + 1 : Math.max(0, currentLikeCount - 1);
-    
-    if (newIsLiked) {
-      dispatch(addLikedPost(postId));
-    } else {
-      dispatch(removeLikedPost(postId));
-    }
-    dispatch(setPostLikeCount({ postId, count: newLikeCount }));
-    
-    // Update posts array optimistically
+    // Update the post's like count in the posts array for UI consistency
+    const newLikeCount = likesManager.getLikeCount(postId);
     setPosts(prevPosts => 
       prevPosts.map(post => 
         post.id === postId 
@@ -798,65 +796,6 @@ export default function FeedScreen() {
           : post
       )
     );
-    
-    try {
-      const response = await likesApi.toggle(postId);
-      
-      if (response.status === 'success' && response.data) {
-        // Update with server response to ensure consistency
-        const serverIsLiked = response.data.isLiked;
-        const serverLikeCount = response.data.likeCount;
-        
-        // Update Redux with server response
-        if (serverIsLiked) {
-          dispatch(addLikedPost(postId));
-        } else {
-          dispatch(removeLikedPost(postId));
-        }
-        dispatch(setPostLikeCount({ postId, count: serverLikeCount }));
-        
-        // Update the post's like count in the posts array
-        setPosts(prevPosts => 
-          prevPosts.map(post => 
-            post.id === postId 
-              ? { ...post, likes: serverLikeCount }
-              : post
-          )
-        );
-      } else {
-        // Revert on error
-        if (isCurrentlyLiked) {
-          dispatch(addLikedPost(postId));
-        } else {
-          dispatch(removeLikedPost(postId));
-        }
-        dispatch(setPostLikeCount({ postId, count: currentLikeCount }));
-        setPosts(prevPosts => 
-          prevPosts.map(post => 
-            post.id === postId 
-              ? { ...post, likes: currentLikeCount }
-              : post
-          )
-        );
-        console.error('Like toggle failed:', response.message);
-      }
-    } catch (error: any) {
-      // Revert on error
-      if (isCurrentlyLiked) {
-        dispatch(addLikedPost(postId));
-      } else {
-        dispatch(removeLikedPost(postId));
-      }
-      dispatch(setPostLikeCount({ postId, count: currentLikeCount }));
-      setPosts(prevPosts => 
-        prevPosts.map(post => 
-          post.id === postId 
-            ? { ...post, likes: currentLikeCount }
-            : post
-        )
-      );
-      console.error('Like API error:', error);
-    }
   };
 
   const handleFollow = async (userId: string) => {
@@ -916,6 +855,13 @@ export default function FeedScreen() {
     if (viewableItems.length > 0) {
       const visibleItem = viewableItems[0];
       const newIndex = visibleItem.index || 0;
+      const postId = visibleItem.item?.id;
+      
+      // Add post to batch like status check queue
+      if (postId) {
+        likesManager.onPostVisible(postId);
+      }
+      
       if (activeVideoRef.current) {
         pauseAllVideosExcept(null);
       }

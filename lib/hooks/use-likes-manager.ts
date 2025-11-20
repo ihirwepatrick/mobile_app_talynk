@@ -69,15 +69,10 @@ export const useLikesManager = () => {
             }
           });
 
-          // Update Redux store
+          // Update Redux store - merge with existing liked posts
           if (liked.length > 0) {
-            const currentLiked = [...likedPosts];
-            liked.forEach(id => {
-              if (!currentLiked.includes(id)) {
-                currentLiked.push(id);
-              }
-            });
-            dispatch(setLikedPosts(currentLiked));
+            const currentLiked = new Set([...likedPosts, ...liked]);
+            dispatch(setLikedPosts(Array.from(currentLiked)));
           }
 
           if (Object.keys(counts).length > 0) {
