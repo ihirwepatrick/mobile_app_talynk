@@ -8,7 +8,10 @@ import 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 
 import { AuthProvider } from '@/lib/auth-context';
-import { CacheProvider } from '@/lib/cache-context'
+import { CacheProvider } from '@/lib/cache-context';
+import { Provider } from 'react-redux';
+import { store } from '@/lib/store';
+import { initializeStore } from '@/lib/store/initializeStore';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 
 export {
@@ -53,23 +56,31 @@ function RootLayoutNav() {
   // Force dark theme
   const theme = DarkTheme;
 
+  // Initialize Redux store from AsyncStorage
+  useEffect(() => {
+    initializeStore();
+  }, []);
+
   return (
-    <CacheProvider>
-      <AuthProvider>
-        <ThemeProvider value={theme}>
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="auth" options={{ headerShown: false }} />
-            <Stack.Screen name="post/[id]" options={{ headerShown: false }} />
-            <Stack.Screen name="user/[id]" options={{ headerShown: false }} />
-            <Stack.Screen name="followers/[id]" options={{ headerShown: false }} />
-            <Stack.Screen name="settings" options={{ headerShown: false }} />
-            <Stack.Screen name="search" options={{ headerShown: false }} />
-            <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
-          </Stack>
-          <StatusBar style="light" />
-        </ThemeProvider>
-      </AuthProvider>
-    </CacheProvider>
+    <Provider store={store}>
+      <CacheProvider>
+        <AuthProvider>
+          <ThemeProvider value={theme}>
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="auth" options={{ headerShown: false }} />
+              <Stack.Screen name="post/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="user/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="followers/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="settings" options={{ headerShown: false }} />
+              <Stack.Screen name="search" options={{ headerShown: false }} />
+              <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
+              <Stack.Screen name="camera" options={{ headerShown: false }} />
+            </Stack>
+            <StatusBar style="light" />
+          </ThemeProvider>
+        </AuthProvider>
+      </CacheProvider>
+    </Provider>
   );
 }

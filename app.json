@@ -43,6 +43,13 @@
       ],
       [
         "expo-notifications"
+      ],
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "$(PRODUCT_NAME) needs access to your Camera to record videos.",
+          "microphonePermissionText": "$(PRODUCT_NAME) needs access to your Microphone to record audio with videos."
+        }
       ]
     ],
     "experiments": {

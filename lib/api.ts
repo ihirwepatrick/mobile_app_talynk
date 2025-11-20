@@ -311,20 +311,23 @@ export const postsApi = {
     }
   },
 
-  checkLikeStatus: async (postId: string): Promise<ApiResponse<{ liked: boolean }>> => {
+  checkLikeStatus: async (postId: string): Promise<ApiResponse<{ isLiked: boolean; likeCount: number }>> => {
     try {
-      const response = await apiClient.get(`/api/posts/${postId}/like-status`);
+      const response = await apiClient.get(`/api/likes/posts/${postId}/status`);
       return {
         status: response.data.status,
         message: response.data.message,
-        data: { liked: response.data.data?.hasLiked || false },
+        data: { 
+          isLiked: response.data.data?.isLiked || false,
+          likeCount: response.data.data?.likeCount || 0,
+        },
       };
     } catch (error: any) {
       console.error('Check like status error:', error.response?.data || error.message);
       return {
         status: 'error',
         message: 'Failed to check like status',
-        data: { liked: false },
+        data: { isLiked: false, likeCount: 0 },
       };
     }
   },
@@ -370,13 +373,33 @@ export const postsApi = {
   },
   addComment: async (postId: string, content: string): Promise<ApiResponse<{ comment: any }>> => {
     try {
-      const response = await apiClient.post(`/api/posts/${postId}/comments`, { content });
+      // Validate content before sending
+      if (!content || typeof content !== 'string' || content.trim().length === 0) {
+        console.error('addComment: Invalid content provided', { content, type: typeof content, length: content?.length });
+        return {
+          status: 'error',
+          message: 'Comment text is required',
+          data: { comment: null },
+        };
+      }
+      
+      const trimmedContent = content.trim();
+      console.log('addComment API call:', { postId, contentLength: trimmedContent.length, contentPreview: trimmedContent.substring(0, 50) });
+      
+      const response = await apiClient.post(`/api/posts/${postId}/comments`, { content: trimmedContent });
       return response.data;
     } catch (error: any) {
       console.error('Add comment API error:', error);
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to add comment';
+      console.error('Add comment error details:', {
+        message: errorMessage,
+        status: error.response?.status,
+        data: error.response?.data,
+        requestData: { postId, content: content?.substring(0, 50) }
+      });
       return {
         status: 'error',
-        message: error.response?.data?.message || 'Failed to add comment',
+        message: errorMessage,
         data: { comment: null },
       };
     }
@@ -620,7 +643,14 @@ export const likesApi = {
   toggle: async (postId: string): Promise<ApiResponse<{ isLiked: boolean; likeCount: number }>> => {
     try {
       const response = await apiClient.post(`/api/likes/posts/${postId}/toggle`);
-      return response.data;
+      return {
+        status: response.data.status,
+        message: response.data.message,
+        data: {
+          isLiked: response.data.data?.isLiked || false,
+          likeCount: response.data.data?.likeCount || 0,
+        },
+      };
     } catch (error: any) {
       console.error('Toggle like API error:', {
         message: error.message,
@@ -639,7 +669,14 @@ export const likesApi = {
   getStatus: async (postId: string): Promise<ApiResponse<{ isLiked: boolean; likeCount: number }>> => {
     try {
       const response = await apiClient.get(`/api/likes/posts/${postId}/status`);
-      return response.data;
+      return {
+        status: response.data.status,
+        message: response.data.message,
+        data: {
+          isLiked: response.data.data?.isLiked || false,
+          likeCount: response.data.data?.likeCount || 0,
+        },
+      };
     } catch (error: any) {
       console.error('Get like status API error:', error);
       return {
@@ -647,6 +684,38 @@ export const likesApi = {
         message: error.response?.data?.message || 'Failed to get like status',
         data: { isLiked: false, likeCount: 0 },
       } as any;
+    }
+  },
+
+  batchCheckStatus: async (postIds: string[]): Promise<ApiResponse<Record<string, { isLiked: boolean; likeCount: number }>>> => {
+    try {
+      if (!Array.isArray(postIds) || postIds.length === 0) {
+        return {
+          status: 'error',
+          message: 'postIds must be a non-empty array',
+          data: {},
+        };
+      }
+
+      // Limit to 100 posts per batch (as per backend constraint)
+      const batchIds = postIds.slice(0, 100);
+      
+      const response = await apiClient.post('/api/likes/posts/batch-status', {
+        postIds: batchIds,
+      });
+
+      return {
+        status: response.data.status,
+        message: response.data.message,
+        data: response.data.data || {},
+      };
+    } catch (error: any) {
+      console.error('Batch check like status API error:', error);
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to check like statuses',
+        data: {},
+      };
     }
   },
 };

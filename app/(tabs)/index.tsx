@@ -18,15 +18,25 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Video, ResizeMode } from 'expo-av';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { postsApi, likesApi } from '@/lib/api';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
+import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
+import { 
+  addLikedPost, 
+  removeLikedPost, 
+  setPostLikeCount, 
+  setPostLikeCounts,
+  updateLikeCount,
+  clearLikes,
+} from '@/lib/store/slices/likesSlice';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
 import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
+import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 
@@ -35,6 +45,22 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 // Global mute context
 const MuteContext = createContext({ isMuted: false, setIsMuted: (v: boolean) => {} });
 const useMute = () => useContext(MuteContext);
+
+// Global video manager to ensure only one video plays at a time
+const activeVideoRef = { current: null as Video | null };
+const pauseAllVideosExcept = async (currentVideo: Video | null) => {
+  if (activeVideoRef.current && activeVideoRef.current !== currentVideo) {
+    try {
+      const status = await activeVideoRef.current.getStatusAsync();
+      if (status?.isLoaded && status.isPlaying) {
+        await activeVideoRef.current.pauseAsync();
+      }
+    } catch (error) {
+      // Silently handle errors
+    }
+  }
+  activeVideoRef.current = currentVideo;
+};
 
 // Feed tabs
 const FEED_TABS = [
@@ -69,11 +95,11 @@ const timeAgo = (date: string): string => {
   return postDate.toLocaleDateString();
 };
 
-const getMediaUrl = (post: Post): string => {
+const getMediaUrl = (post: Post): string | null => {
   // Check for fullUrl first (from API response), then video_url/image, then imageUrl
-  let url = (post as any).fullUrl || post.video_url || post.image || post.imageUrl || '';
-  if (!url) return 'https://via.placeholder.com/300x500';
-  return url;
+  const url = (post as any).fullUrl || post.video_url || post.image || post.imageUrl || '';
+  // Return null if no valid URL instead of placeholder
+  return url && url.trim() !== '' ? url : null;
 };
 
 interface PostItemProps {
@@ -107,12 +133,27 @@ const PostItem: React.FC<PostItemProps> = ({
 }) => {
   const { user } = useAuth();
   const { sendLikeAction } = useRealtime();
+  const dispatch = useAppDispatch();
+  const likedPosts = useAppSelector(state => state.likes.likedPosts);
+  const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
+  
+  // Check if post is liked using Redux
+  const isPostLiked = likedPosts.includes(item.id);
+  
+  // Get like count from Redux if available, otherwise use post data
+  const cachedLikeCount = postLikeCounts[item.id];
+  const initialLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.likes || 0);
+  
   const { likes, comments, isLiked: realtimeIsLiked, updateLikesLocally } = useRealtimePost({
     postId: item.id,
-    initialLikes: item.likes || 0,
+    initialLikes: initialLikeCount,
     initialComments: item.comments_count || 0,
-    initialIsLiked: isLiked,
+    initialIsLiked: isPostLiked || isLiked,
   });
+  
+  // Use the realtime hook's isLiked state as the source of truth
+  // The hook handles optimistic updates and server sync internally
+  // No need to sync from parent prop - the hook manages its own state
   const videoRef = useRef<Video>(null);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -128,42 +169,53 @@ const PostItem: React.FC<PostItemProps> = ({
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
 
-  // Handle video play/pause based on active state - improved with status checking
+  const mediaUrl = getMediaUrl(item);
+  const isVideo = item.type === 'video' || !!item.video_url || 
+    (mediaUrl !== null && (mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm')));
+
+  // Simple video play/pause control - KISS principle
   useEffect(() => {
-    if (!videoRef.current || useNativeControls) return;
+    if (!videoRef.current || useNativeControls || !isVideo) return;
     
     const managePlayback = async () => {
       try {
+        const currentVideo = videoRef.current;
+        if (!currentVideo) return;
+        
+        const status = await currentVideo.getStatusAsync();
+        if (!status?.isLoaded) return;
+        
         if (isActive) {
-          // Try to play - don't wait for videoLoaded
-          const status = await videoRef.current?.getStatusAsync();
-          if (status && status.isLoaded && !status.isPlaying) {
-            await videoRef.current?.playAsync();
-          } else if (!status || !status.isLoaded) {
-            // Video not loaded yet, but shouldPlay prop will handle it
-            console.log('Video not loaded yet, waiting for shouldPlay');
+          // Pause all other videos first
+          await pauseAllVideosExcept(currentVideo);
+          // Play this video if not already playing
+          if (!status.isPlaying) {
+            await currentVideo.playAsync();
           }
         } else {
           // Pause if playing
-          const status = await videoRef.current?.getStatusAsync();
-          if (status && status.isLoaded && status.isPlaying) {
-            await videoRef.current?.pauseAsync();
-            setIsPlaying(false);
+          if (status.isPlaying) {
+            await currentVideo.pauseAsync();
+          }
+          if (activeVideoRef.current === currentVideo) {
+            activeVideoRef.current = null;
           }
         }
       } catch (error) {
-        // Silently handle playback errors
-        console.log('Playback management error:', error);
+        // Silently handle errors
       }
     };
     
     managePlayback();
-  }, [isActive, useNativeControls]);
+  }, [isActive, useNativeControls, isVideo]);
 
   // Cleanup video on unmount
   useEffect(() => {
     return () => {
       if (videoRef.current) {
+        if (activeVideoRef.current === videoRef.current) {
+          activeVideoRef.current = null;
+        }
         videoRef.current.unloadAsync().catch(() => {});
       }
     };
@@ -174,8 +226,22 @@ const PostItem: React.FC<PostItemProps> = ({
   };
 
   const handleLike = async () => {
+    // Check if user is logged in - show alert and redirect
     if (!user) {
-      router.push('/auth/login');
+      Alert.alert(
+        'Login Required',
+        'Please log in to like posts and interact with the community.',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel'
+          },
+          {
+            text: 'Log In',
+            onPress: () => router.push('/auth/login')
+          }
+        ]
+      );
       return;
     }
     
@@ -187,9 +253,22 @@ const PostItem: React.FC<PostItemProps> = ({
     const currentIsLiked = realtimeIsLiked;
     const newIsLiked = !currentIsLiked;
     
-    // Optimistic update
+    // Optimistic update - update Redux immediately
+    if (newIsLiked) {
+      dispatch(addLikedPost(item.id));
+    } else {
+      dispatch(removeLikedPost(item.id));
+    }
+    
+    // Update like count in Redux
     const newLikeCount = newIsLiked ? likes + 1 : Math.max(0, likes - 1);
+    dispatch(setPostLikeCount({ postId: item.id, count: newLikeCount }));
+    
+    // Update realtime hook
     updateLikesLocally(newLikeCount, newIsLiked);
+    
+    // Also update parent cache immediately for UI consistency
+    onLike(item.id);
     
     // Animate like button
     Animated.sequence([
@@ -223,13 +302,61 @@ const PostItem: React.FC<PostItemProps> = ({
     // Send realtime update
     sendLikeAction(item.id, newIsLiked);
     
-    // Call API to toggle like
+    // Call API to toggle like directly
     try {
-      await onLike(item.id);
-    } catch (error) {
+      const response = await likesApi.toggle(item.id);
+      
+      if (response.status === 'success' && response.data) {
+        // Update with server response
+        const serverIsLiked = response.data.isLiked;
+        const serverLikeCount = response.data.likeCount;
+        
+        // Update Redux with server response
+        if (serverIsLiked) {
+          dispatch(addLikedPost(item.id));
+        } else {
+          dispatch(removeLikedPost(item.id));
+        }
+        dispatch(setPostLikeCount({ postId: item.id, count: serverLikeCount }));
+        
+        // Update local state with server response
+        updateLikesLocally(serverLikeCount, serverIsLiked);
+      } else {
+        // Revert on error
+        updateLikesLocally(likes, currentIsLiked);
+        // Check if it's an auth error
+        if (response.message?.includes('User not found') || response.message?.includes('log in')) {
+          Alert.alert(
+            'Session Expired',
+            'Your session has expired. Please log in again.',
+            [
+              {
+                text: 'OK',
+                onPress: () => router.push('/auth/login')
+              }
+            ]
+          );
+        }
+      }
+    } catch (error: any) {
       // Revert on error
       updateLikesLocally(likes, currentIsLiked);
-      console.error('Like error:', error);
+      
+      // Handle authentication errors
+      if (error?.status === 404 || error?.status === 401 || 
+          error?.data?.message?.includes('User not found') ||
+          error?.data?.message?.includes('log in')) {
+        Alert.alert(
+          'Session Expired',
+          'Your session has expired. Please log in again to continue.',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.push('/auth/login')
+            }
+          ]
+        );
+      }
     } finally {
       setIsLiking(false);
     }
@@ -248,12 +375,11 @@ const PostItem: React.FC<PostItemProps> = ({
     }
   };
 
-  const handleComment = () => {
-    // Allow viewing comments even if not logged in
-    if (onComment) {
+  const handleComment = useCallback(() => {
+    if (onComment && item.id) {
       onComment(item.id);
     }
-  };
+  }, [onComment, item.id]);
 
   const handleUserPress = () => {
             if (item.user?.id) {
@@ -274,29 +400,6 @@ const PostItem: React.FC<PostItemProps> = ({
     }
   };
 
-  const mediaUrl = getMediaUrl(item);
-  // Check if it's a video: use type field, video_url, or fullUrl extension
-  const isVideo = item.type === 'video' || !!item.video_url || 
-    (mediaUrl && (mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm')));
-  
-  // Debug logging for media URL
-  if (!mediaUrl || mediaUrl === 'https://via.placeholder.com/300x500') {
-    console.warn('Post has no valid media URL:', {
-      id: item.id,
-      video_url: item.video_url,
-      image: item.image,
-      fullUrl: (item as any).fullUrl,
-      type: item.type
-    });
-  } else if (isVideo) {
-    console.log('Video post detected:', {
-      id: item.id,
-      mediaUrl: mediaUrl.substring(0, 60) + '...',
-      isActive,
-      useNativeControls: useNativeControls
-    });
-  }
-
   return (
     <View style={[styles.postContainer, { height: availableHeight }]}>
       {/* Media */}
@@ -304,15 +407,21 @@ const PostItem: React.FC<PostItemProps> = ({
         {isVideo ? (
           videoError ? (
             <View style={styles.mediaWrapper}>
-              <Image
-                source={{ uri: mediaUrl || 'https://via.placeholder.com/300x500' }}
-                style={styles.media}
-                resizeMode="contain"
-                onError={(error) => {
-                  console.error('Video error fallback image failed:', error, 'URL:', mediaUrl);
-                  setImageError(true);
-                }}
-              />
+              {mediaUrl ? (
+                <Image
+                  source={{ uri: mediaUrl }}
+                  style={styles.media}
+                  resizeMode="contain"
+                  onError={() => {
+                    setImageError(true);
+                  }}
+                />
+              ) : (
+                <View style={[styles.media, styles.placeholderContainer]}>
+                  <Feather name="video-off" size={48} color="#666" />
+                  <Text style={styles.placeholderText}>Video unavailable</Text>
+                </View>
+              )}
             </View>
           ) : (
             <TouchableOpacity 
@@ -322,7 +431,7 @@ const PostItem: React.FC<PostItemProps> = ({
             >
               <Video
                 ref={videoRef}
-                source={{ uri: mediaUrl }}
+                source={{ uri: mediaUrl || '' }}
                 style={styles.media}
                 resizeMode={ResizeMode.COVER}
                 shouldPlay={useNativeControls ? false : (isActive && !decoderErrorDetected)}
@@ -332,40 +441,33 @@ const PostItem: React.FC<PostItemProps> = ({
                 shouldCorrectPitch={true}
                 volume={useNativeControls ? 1.0 : (isMuted ? 0.0 : 1.0)}
                 onLoad={() => {
-                  console.log('Video loaded successfully:', item.id, mediaUrl);
                   setVideoLoaded(true);
                   // Auto-play if active
-                  if (isActive && !useNativeControls) {
-                    videoRef.current?.playAsync().catch(console.log);
+                  if (isActive && !useNativeControls && videoRef.current) {
+                    pauseAllVideosExcept(videoRef.current).then(() => {
+                      videoRef.current?.playAsync().catch(() => {});
+                    });
                   }
                 }}
                 onError={(error: any) => {
-                  // Only log error if we haven't already detected decoder error
                   if (!decoderErrorDetected) {
                     const errorMessage = error?.message || error?.toString() || '';
-                    console.log('Video error for post:', item.id, errorMessage);
                     if (errorMessage.includes('Decoder') || errorMessage.includes('decoder') || errorMessage.includes('OMX')) {
-                      // Decoder error - switch to native controls silently
-                      console.log('Switching to native controls for post:', item.id);
+                      // Decoder error - switch to native controls
                       setDecoderErrorDetected(true);
                       setUseNativeControls(true);
                       setVideoError(false);
-                      setVideoLoaded(true); // Mark as loaded so native controls can work
+                      setVideoLoaded(true);
                     } else {
-                      console.error('Non-decoder video error:', error);
                       setVideoError(true);
                     }
                   }
                 }}
                 useNativeControls={useNativeControls}
                 onPlaybackStatusUpdate={(status: any) => {
-                  if (status.isLoaded) {
-                    if (!useNativeControls) {
+                  if (status.isLoaded && !useNativeControls) {
+                    if (status.isPlaying !== isPlaying) {
                       setIsPlaying(status.isPlaying);
-                    }
-                    // If video loaded but not playing and should be active, try to play
-                    if (isActive && !status.isPlaying && !useNativeControls && videoLoaded) {
-                      videoRef.current?.playAsync().catch(console.log);
                     }
                   }
                 }}
@@ -374,18 +476,22 @@ const PostItem: React.FC<PostItemProps> = ({
           )
         ) : (
           <View style={styles.mediaWrapper}>
-            <Image
-              source={{ uri: imageError ? 'https://via.placeholder.com/300x500' : mediaUrl }}
-              style={styles.media}
-              resizeMode="cover"
-              onError={(error) => {
-                console.error('Image load error:', error, 'URL:', mediaUrl);
-                setImageError(true);
-              }}
-              onLoad={() => {
-                console.log('Image loaded successfully:', mediaUrl);
-              }}
-            />
+            {mediaUrl && !imageError ? (
+              <Image
+                source={{ uri: mediaUrl }}
+                style={styles.media}
+                resizeMode="cover"
+                onError={() => {
+                  setImageError(true);
+                }}
+                onLoad={() => {}}
+              />
+            ) : (
+              <View style={[styles.media, styles.placeholderContainer]}>
+                <Feather name="image" size={48} color="#666" />
+                <Text style={styles.placeholderText}>Image unavailable</Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -445,7 +551,14 @@ const PostItem: React.FC<PostItemProps> = ({
           </Animated.View>
 
           {/* Comment Button */}
-          <TouchableOpacity style={styles.actionButton} onPress={handleComment}>
+          <TouchableOpacity 
+            style={styles.actionButton} 
+            onPress={() => {
+              handleComment();
+            }}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
             <Feather name="message-circle" size={24} color="#fff" />
             <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
           </TouchableOpacity>
@@ -514,6 +627,8 @@ export default function FeedScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('featured');
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isScreenFocused, setIsScreenFocused] = useState(true);
+  const lastActiveIndexRef = useRef(0);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -523,8 +638,14 @@ export default function FeedScreen() {
   const [isMuted, setIsMuted] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const { user } = useAuth();
-  const { likedPosts, followedUsers, updateLikedPosts, updateFollowedUsers } = useCache();
+  const { followedUsers, updateFollowedUsers, syncLikedPostsFromServer } = useCache();
+  const dispatch = useAppDispatch();
+  const likedPosts = useAppSelector(state => state.likes.likedPosts);
+  const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
   const insets = useSafeAreaInsets();
+  
+  // Efficient likes manager for batch checking
+  const likesManager = useLikesManager();
   
   // Calculate available height for posts (screen height - header - bottom navbar)
   // Header: insets.top (safe area) + ~50px (tabs content) + 8px (paddingBottom)
@@ -540,28 +661,20 @@ export default function FeedScreen() {
       setLoading(refresh ? false : true);
       let response;
       
-      console.log(`Loading posts for tab: ${tab}, refresh: ${refresh}`);
-      
       // Add timestamp to force fresh data on refresh
       const timestamp = refresh ? `&t=${Date.now()}` : '';
       
       // Load different content based on tab
       switch (tab) {
         case 'featured':
-          // Featured posts - get admin curated featured posts
           response = await postsApi.getFeatured(1, 20, timestamp);
-          console.log('Featured posts response:', response);
           break;
         case 'foryou':
-          // For you algorithm - get personalized posts (using all posts for now)
           response = await postsApi.getAll(1, 20, timestamp);
-          console.log('For you posts response:', response);
           break;
         case 'following':
           if (user) {
-            // Following posts - get posts from followed users
             response = await postsApi.getFollowing(1, 20, timestamp);
-            console.log('Following posts response:', response);
           } else {
             response = { status: 'success', data: { posts: [], pagination: {}, filters: {} } };
           }
@@ -571,18 +684,28 @@ export default function FeedScreen() {
       }
       
       if (response.status === 'success') {
-        // Handle nested response structure: data.posts instead of just data
         const posts = response.data.posts || response.data;
-        console.log(`Setting ${posts?.length || 0} posts for ${tab} tab`);
-        console.log(`Posts data structure:`, { 
-          hasPosts: !!response.data.posts, 
-          postsLength: posts?.length,
-          firstPost: posts?.[0] 
+        const postsArray = Array.isArray(posts) ? posts : [];
+        
+        // Update like counts in Redux
+        const likeCountsMap: Record<string, number> = {};
+        postsArray.forEach((post: Post) => {
+          if (post.likes !== undefined) {
+            likeCountsMap[post.id] = post.likes;
+          }
         });
-        setPosts(Array.isArray(posts) ? posts : []);
+        if (Object.keys(likeCountsMap).length > 0) {
+          dispatch(setPostLikeCounts(likeCountsMap));
+        }
+        
+        // Sync liked posts from server if user is logged in
+        if (user && postsArray.length > 0) {
+          const postIds = postsArray.map((p: Post) => p.id);
+          syncLikedPostsFromServer(postIds).catch(console.error);
+        }
+        
+        setPosts(postsArray);
       } else {
-        console.error('Failed to load posts:', response.message);
-        console.log('Setting undefined posts for featured tab');
         setPosts([]);
       }
     } catch (error) {
@@ -597,11 +720,22 @@ export default function FeedScreen() {
     loadPosts(activeTab);
   }, [activeTab]);
 
+  // Sync liked posts when user logs in or posts change
+  useEffect(() => {
+    if (user && posts.length > 0) {
+      const postIds = posts.map(p => p.id);
+      // Use batch checking for efficiency
+      syncLikedPostsFromServer(postIds).catch(console.error);
+    } else if (!user) {
+      // Clear liked posts when user logs out
+      dispatch(clearLikes());
+    }
+  }, [user?.id, posts.length]); // Sync when user changes or posts load
+
   // Reload posts when app comes back to foreground
   useEffect(() => {
     const handleAppStateChange = (nextAppState: string) => {
       if (nextAppState === 'active') {
-        console.log('App became active, reloading posts...');
         loadPosts(activeTab, true);
       }
     };
@@ -609,6 +743,28 @@ export default function FeedScreen() {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
   }, [activeTab]);
+
+  // Handle screen focus/blur - preserve video state
+  const currentIndexRef = useRef(currentIndex);
+  
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setIsScreenFocused(true);
+      if (lastActiveIndexRef.current >= 0) {
+        setCurrentIndex(lastActiveIndexRef.current);
+      }
+      return () => {
+        const savedIndex = currentIndexRef.current;
+        setIsScreenFocused(false);
+        lastActiveIndexRef.current = savedIndex;
+        pauseAllVideosExcept(null);
+      };
+    }, [])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -620,10 +776,28 @@ export default function FeedScreen() {
       return;
     }
     
-    const isCurrentlyLiked = likedPosts.has(postId);
+    const isCurrentlyLiked = likedPosts.includes(postId);
+    const currentLikeCount = postLikeCounts[postId] || 0;
     
-    // Optimistic update
-    updateLikedPosts(postId, !isCurrentlyLiked);
+    // Optimistic update - update Redux immediately
+    const newIsLiked = !isCurrentlyLiked;
+    const newLikeCount = newIsLiked ? currentLikeCount + 1 : Math.max(0, currentLikeCount - 1);
+    
+    if (newIsLiked) {
+      dispatch(addLikedPost(postId));
+    } else {
+      dispatch(removeLikedPost(postId));
+    }
+    dispatch(setPostLikeCount({ postId, count: newLikeCount }));
+    
+    // Update posts array optimistically
+    setPosts(prevPosts => 
+      prevPosts.map(post => 
+        post.id === postId 
+          ? { ...post, likes: newLikeCount }
+          : post
+      )
+    );
     
     try {
       const response = await likesApi.toggle(postId);
@@ -633,18 +807,54 @@ export default function FeedScreen() {
         const serverIsLiked = response.data.isLiked;
         const serverLikeCount = response.data.likeCount;
         
-        // Only update if different from optimistic update
-        if (serverIsLiked !== !isCurrentlyLiked) {
-          updateLikedPosts(postId, serverIsLiked);
+        // Update Redux with server response
+        if (serverIsLiked) {
+          dispatch(addLikedPost(postId));
+        } else {
+          dispatch(removeLikedPost(postId));
         }
+        dispatch(setPostLikeCount({ postId, count: serverLikeCount }));
+        
+        // Update the post's like count in the posts array
+        setPosts(prevPosts => 
+          prevPosts.map(post => 
+            post.id === postId 
+              ? { ...post, likes: serverLikeCount }
+              : post
+          )
+        );
       } else {
         // Revert on error
-        updateLikedPosts(postId, isCurrentlyLiked);
+        if (isCurrentlyLiked) {
+          dispatch(addLikedPost(postId));
+        } else {
+          dispatch(removeLikedPost(postId));
+        }
+        dispatch(setPostLikeCount({ postId, count: currentLikeCount }));
+        setPosts(prevPosts => 
+          prevPosts.map(post => 
+            post.id === postId 
+              ? { ...post, likes: currentLikeCount }
+              : post
+          )
+        );
         console.error('Like toggle failed:', response.message);
       }
     } catch (error: any) {
       // Revert on error
-      updateLikedPosts(postId, isCurrentlyLiked);
+      if (isCurrentlyLiked) {
+        dispatch(addLikedPost(postId));
+      } else {
+        dispatch(removeLikedPost(postId));
+      }
+      dispatch(setPostLikeCount({ postId, count: currentLikeCount }));
+      setPosts(prevPosts => 
+        prevPosts.map(post => 
+          post.id === postId 
+            ? { ...post, likes: currentLikeCount }
+            : post
+        )
+      );
       console.error('Like API error:', error);
     }
   };
@@ -667,31 +877,28 @@ export default function FeedScreen() {
     }
   };
 
-  const handleComment = (postId: string) => {
-    console.log('handleComment called with postId:', postId);
+  const handleComment = useCallback((postId: string) => {
+    if (!postId) return;
+    
     const post = posts.find(p => p.id === postId);
-    if (post) {
-      console.log('Post found, opening comment modal');
-      setCommentsPostId(postId);
-      setCommentsPostTitle(post.title || post.description || '');
-      setCommentsPostAuthor(post.user?.username || '');
-      setCommentsModalVisible(true);
-    } else {
-      console.log('Post not found for postId:', postId);
-    }
-  };
+    setCommentsPostId(postId);
+    setCommentsPostTitle(post?.title || post?.description || '');
+    setCommentsPostAuthor(post?.user?.username || '');
+    setCommentsModalVisible(true);
+  }, [posts]);
 
   const handleShare = async (postId: string) => {
     const post = posts.find(p => p.id === postId);
     if (post) {
       try {
+        const mediaUrl = getMediaUrl(post);
         await Share.share({
-          message: getMediaUrl(post),
+          message: mediaUrl || post.caption || 'Check out this post on Talynk!',
           title: 'Check out this post on Talynk!',
-          url: getMediaUrl(post),
+          url: mediaUrl || undefined,
         });
       } catch (error) {
-        console.error('Share error:', error);
+        // Silently handle share errors
       }
     }
   };
@@ -709,8 +916,14 @@ export default function FeedScreen() {
     if (viewableItems.length > 0) {
       const visibleItem = viewableItems[0];
       const newIndex = visibleItem.index || 0;
-      console.log('Viewable item changed - index:', newIndex, 'postId:', visibleItem.item?.id);
+      if (activeVideoRef.current) {
+        pauseAllVideosExcept(null);
+      }
       setCurrentIndex(newIndex);
+      lastActiveIndexRef.current = newIndex;
+    } else {
+      pauseAllVideosExcept(null);
+      setCurrentIndex(-1);
     }
   }).current;
 
@@ -775,9 +988,9 @@ export default function FeedScreen() {
               onReport={handleReport}
               onFollow={handleFollow}
               onUnfollow={handleUnfollow}
-              isLiked={likedPosts.has(item.id)}
+              isLiked={likedPosts.includes(item.id)}
               isFollowing={followedUsers.has(item.user?.id || '')}
-              isActive={currentIndex === index}
+              isActive={isScreenFocused && currentIndex === index}
               availableHeight={availableHeight}
             />
           )}
@@ -789,10 +1002,17 @@ export default function FeedScreen() {
           decelerationRate="fast"
           style={{ marginTop: headerHeight }}
           contentContainerStyle={{ paddingBottom: 0 }}
-          windowSize={4}
+          // Lazy loading optimizations for better performance
+          windowSize={3}
           initialNumToRender={2}
           maxToRenderPerBatch={2}
+          updateCellsBatchingPeriod={50}
           removeClippedSubviews={true}
+          getItemLayout={(data, index) => ({
+            length: availableHeight,
+            offset: availableHeight * index,
+            index,
+          })}
           refreshControl={
             <RefreshControl 
               refreshing={refreshing} 
@@ -833,7 +1053,9 @@ export default function FeedScreen() {
         visible={commentsModalVisible && !!commentsPostId}
         onClose={() => {
           setCommentsModalVisible(false);
-          setCommentsPostId(null);
+          setTimeout(() => {
+            setCommentsPostId(null);
+          }, 300);
         }}
         postId={commentsPostId || ''}
         postTitle={commentsPostTitle}
@@ -957,7 +1179,11 @@ const styles = StyleSheet.create({
   actionButton: {
     alignItems: 'center',
     marginBottom: 16,
-    minWidth: 40,
+    minWidth: 50,
+    minHeight: 50,
+    justifyContent: 'center',
+    padding: 8,
+    zIndex: 20,
   },
   actionCount: {
     color: '#fff',
@@ -1050,5 +1276,15 @@ const styles = StyleSheet.create({
     color: '#999',
     fontSize: 14,
     textAlign: 'center',
+  },
+  placeholderContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+  },
+  placeholderText: {
+    color: '#666',
+    fontSize: 14,
+    marginTop: 12,
   },
 });

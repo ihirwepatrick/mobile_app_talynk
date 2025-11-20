@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { postsApi } from '@/lib/api';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -27,6 +27,7 @@ import { categoriesApi } from '@/lib/api';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/lib/auth-context';
 import { API_BASE_URL } from '@/lib/config';
+import { generateThumbnail } from '@/lib/utils/thumbnail';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -141,12 +142,13 @@ const COLORS = {
 };
 
 export default function CreatePostScreen() {
+  const params = useLocalSearchParams<{ videoUri?: string; thumbnailUri?: string; fromCamera?: string; fromGallery?: string }>();
   const { isAuthenticated, loading: authLoading, user, token } = useAuth();
   const [title, setTitle] = useState('');
   const [caption, setCaption] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
-  const [selectedMedia, setSelectedMedia] = useState<{ uri: string; type: 'image' | 'video'; name: string; mimeType?: string } | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<{ uri: string; type: 'image' | 'video'; name: string; mimeType?: string; thumbnailUri?: string } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -300,7 +302,25 @@ export default function CreatePostScreen() {
     }
   }, [uploadProgress, uploading]);
 
+  // Handle camera/gallery params
+  useEffect(() => {
+    if (params.videoUri) {
+      const fileName = params.videoUri.split('/').pop() || 'video.mp4';
+      setSelectedMedia({
+        uri: params.videoUri,
+        type: 'video',
+        name: fileName,
+        mimeType: 'video/mp4',
+        thumbnailUri: params.thumbnailUri,
+      });
+    }
+  }, [params.videoUri, params.thumbnailUri]);
+
   // --- MEDIA PICKERS ---
+  const openCamera = () => {
+    router.push('/camera');
+  };
+
   const pickMedia = async (mediaType: 'image' | 'video') => {
     let permissionResult;
     if (mediaType === 'image') {
@@ -348,7 +368,20 @@ export default function CreatePostScreen() {
         Alert.alert('File too large', 'Please select a file smaller than 50MB.');
         return;
       }
-      setSelectedMedia({ uri: asset.uri, type: mediaType, name: fileName, mimeType });
+
+      // Generate thumbnail for videos
+      let thumbnailUri: string | null = null;
+      if (mediaType === 'video') {
+        thumbnailUri = await generateThumbnail(asset.uri);
+      }
+
+      setSelectedMedia({ 
+        uri: asset.uri, 
+        type: mediaType, 
+        name: fileName, 
+        mimeType,
+        thumbnailUri: thumbnailUri || undefined,
+      });
     }
   };
 
@@ -794,14 +827,21 @@ export default function CreatePostScreen() {
                       style={[styles.mediaButton, { backgroundColor: C.primary }]} 
                       onPress={() => pickMedia('image')}
                     >
-                      <MaterialIcons name="photo-camera" size={20} color={C.buttonText} />
-                      <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Image</Text>
+                      <MaterialIcons name="photo-library" size={20} color={C.buttonText} />
+                      <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Gallery</Text>
+            </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.mediaButton, { backgroundColor: C.primary }]} 
+                      onPress={openCamera}
+                    >
+                      <MaterialIcons name="videocam" size={20} color={C.buttonText} />
+                      <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Camera</Text>
             </TouchableOpacity>
                     <TouchableOpacity 
                       style={[styles.mediaButton, { backgroundColor: C.primary }]} 
                       onPress={() => pickMedia('video')}
                     >
-                      <MaterialIcons name="videocam" size={20} color={C.buttonText} />
+                      <MaterialIcons name="video-library" size={20} color={C.buttonText} />
                       <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Video</Text>
             </TouchableOpacity>
           </View>

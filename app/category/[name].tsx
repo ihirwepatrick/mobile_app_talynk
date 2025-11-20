@@ -33,7 +33,10 @@ export default function CategoryScreen() {
       // Filter posts by category
       const response = await postsApi.getAll(1, 50);
       if (response.status === 'success') {
-        const filteredPosts = response.data.filter(post => {
+        // Handle nested response structure: data.posts instead of just data
+        const apiData: any = response.data;
+        const posts: Post[] = Array.isArray(apiData) ? apiData : (Array.isArray(apiData?.posts) ? apiData.posts : []);
+        const filteredPosts = posts.filter((post: Post) => {
           const postCategory = typeof post.category === 'string' ? post.category : post.category?.name;
           return postCategory === name;
         });

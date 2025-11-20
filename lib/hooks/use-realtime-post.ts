@@ -20,11 +20,13 @@ export const useRealtimePost = ({
   const [comments, setComments] = useState(initialComments);
   const [isLiked, setIsLiked] = useState(initialIsLiked);
   const [newComments, setNewComments] = useState<CommentUpdate['comment'][]>([]);
+  const [hasLocalUpdate, setHasLocalUpdate] = useState(false);
 
   // Function to update likes locally for optimistic updates
   const updateLikesLocally = useCallback((newLikeCount: number, newIsLiked: boolean) => {
     setLikes(newLikeCount);
     setIsLiked(newIsLiked);
+    setHasLocalUpdate(true);
   }, []);
 
   useEffect(() => {
@@ -36,6 +38,8 @@ export const useRealtimePost = ({
           setLikes(update.likes);
           setComments(update.comments);
           setIsLiked(update.isLiked);
+          // Reset local update flag when we get server update
+          setHasLocalUpdate(false);
         }
       };
 
@@ -66,9 +70,28 @@ export const useRealtimePost = ({
     setComments(initialComments);
   }, [initialComments]);
 
+  // Only update from initialIsLiked if we haven't made local updates
+  // This prevents resetting optimistic updates
   useEffect(() => {
-    setIsLiked(initialIsLiked);
-  }, [initialIsLiked]);
+    if (!hasLocalUpdate) {
+      setIsLiked(initialIsLiked);
+    }
+  }, [initialIsLiked, hasLocalUpdate]);
+  
+  // Reset hasLocalUpdate when initialIsLiked changes from external source (after server response)
+  // This allows syncing when the parent cache updates after API response
+  useEffect(() => {
+    if (hasLocalUpdate) {
+      // If the external state matches our local state after a delay, reset the flag
+      // This means the server has confirmed our optimistic update
+      const timer = setTimeout(() => {
+        if (initialIsLiked === isLiked) {
+          setHasLocalUpdate(false);
+        }
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [initialIsLiked, isLiked, hasLocalUpdate]);
 
   return {
     likes,

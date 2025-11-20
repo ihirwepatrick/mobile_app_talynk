@@ -84,7 +84,8 @@ export default function CommentsModal({
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const flatListRef = useRef<FlatList>(null);
-  const slideAnim = useRef(new Animated.Value(INITIAL_HEIGHT)).current;
+  // Use translateY for animation instead of height (height can't be animated with native driver)
+  const slideAnim = useRef(new Animated.Value(EXPANDED_HEIGHT - INITIAL_HEIGHT)).current; // Start translated up (collapsed)
   const panY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -102,11 +103,14 @@ export default function CommentsModal({
     }
   }, [visible, postId]);
 
-  // Pan responder for drag to expand/collapse
+  // Pan responder for drag to expand/collapse - only on drag handle
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // Only respond to vertical drags (not taps)
+        return Math.abs(gestureState.dy) > 5;
+      },
       onPanResponderMove: (evt, gestureState) => {
         if (gestureState.dy < 0) {
           // Dragging up - expand
@@ -137,7 +141,7 @@ export default function CommentsModal({
   const expandOverlay = () => {
     setIsExpanded(true);
     Animated.spring(slideAnim, {
-      toValue: 0, // Use translateY instead of height
+      toValue: 0, // Translate to 0 (fully visible)
       useNativeDriver: true, // Can use native driver with translateY
       tension: 50,
       friction: 8,
@@ -148,7 +152,7 @@ export default function CommentsModal({
   const collapseOverlay = () => {
     setIsExpanded(false);
     Animated.spring(slideAnim, {
-      toValue: EXPANDED_HEIGHT - INITIAL_HEIGHT, // Translate up to show collapsed
+      toValue: EXPANDED_HEIGHT - INITIAL_HEIGHT, // Translate up to show only INITIAL_HEIGHT
       useNativeDriver: true,
       tension: 50,
       friction: 8,
@@ -182,37 +186,117 @@ export default function CommentsModal({
   };
 
   const submitComment = async () => {
-    if (!commentText.trim() || !user) {
-      if (!user) {
-        Alert.alert('Login Required', 'Please login to comment');
-      }
+    // Get the current value directly to avoid stale state issues
+    const currentText = commentText;
+    const trimmedText = currentText.trim();
+    
+    console.log('submitComment called', { 
+      hasText: !!trimmedText, 
+      textLength: trimmedText.length,
+      originalLength: currentText.length,
+      hasUser: !!user, 
+      hasPostId: !!postId,
+      commentTextPreview: trimmedText.substring(0, 50)
+    });
+    
+    if (!trimmedText || trimmedText.length === 0) {
+      console.log('submitComment: No text to submit');
+      Alert.alert('Error', 'Please enter a comment');
+      return;
+    }
+    
+    if (!user) {
+      console.log('submitComment: No user, showing login alert');
+      Alert.alert('Login Required', 'Please login to comment');
+      return;
+    }
+
+    if (!postId) {
+      console.log('submitComment: No postId, showing error');
+      Alert.alert('Error', 'Post ID is missing');
       return;
     }
 
     try {
       setSubmitting(true);
+      // Clean and validate comment text - remove extra whitespace but keep single newlines
+      const commentContent = trimmedText.replace(/\n{3,}/g, '\n\n').trim();
       
-      const response = await postsApi.addComment(postId, commentText.trim());
+      console.log('Submitting comment:', { 
+        postId, 
+        content: commentContent, 
+        contentLength: commentContent.length,
+        originalLength: currentText.length,
+        userId: user.id 
+      });
       
-      if (response.status === 'success' && response.data?.comment) {
-        // Add the new comment to the list
-        const newComment = Array.isArray(response.data.comment) 
-          ? response.data.comment[0] 
-          : response.data.comment;
+      // Final validation before API call
+      if (!commentContent || commentContent.length === 0) {
+        console.error('Comment content is empty after processing');
+        Alert.alert('Error', 'Please enter a valid comment');
+        setSubmitting(false);
+        return;
+      }
+      
+      const response = await postsApi.addComment(postId, commentContent);
+      console.log('Add comment API response:', JSON.stringify(response, null, 2));
+      
+      if (response.status === 'success') {
+        // Handle different response structures
+        let newComment = null;
+        if (response.data?.comment) {
+          newComment = Array.isArray(response.data.comment) 
+            ? response.data.comment[0] 
+            : response.data.comment;
+        } else if (response.data) {
+          // Sometimes the comment is directly in data
+          newComment = Array.isArray(response.data) 
+            ? response.data[0] 
+            : response.data;
+        }
         
-        setComments(prev => [newComment, ...prev]);
-        setCommentText('');
-        
-        // Scroll to top to show new comment
-        setTimeout(() => {
-          flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-        }, 100);
+        if (newComment) {
+          // Add user info if missing
+          if (!newComment.user && !newComment.User) {
+            newComment.user = {
+              id: user.id,
+              username: user.username,
+              profile_picture: user.profile_picture,
+            };
+          }
+          // Add timestamp if missing
+          if (!newComment.createdAt && !newComment.created_at) {
+            newComment.createdAt = new Date().toISOString();
+          }
+          
+          console.log('Adding new comment to list:', newComment);
+          setComments(prev => [newComment, ...prev]);
+          setCommentText('');
+          
+          // Scroll to top to show new comment
+          setTimeout(() => {
+            flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+          }, 100);
+          
+          // Auto-expand if collapsed
+          if (!isExpanded) {
+            expandOverlay();
+          }
+        } else {
+          console.warn('Comment added but response structure unexpected, refreshing comments');
+          // Refresh comments to get the updated list
+          await fetchComments();
+          setCommentText('');
+        }
       } else {
-        Alert.alert('Error', response.message || 'Failed to submit comment');
+        const errorMessage = response.message || 'Failed to submit comment';
+        console.error('Comment submission failed:', errorMessage);
+        Alert.alert('Error', errorMessage);
       }
     } catch (error: any) {
       console.error('Error submitting comment:', error);
-      Alert.alert('Error', error.response?.data?.message || 'Failed to submit comment');
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to submit comment';
+      Alert.alert('Error', errorMessage);
     } finally {
       setSubmitting(false);
     }
@@ -224,18 +308,20 @@ export default function CommentsModal({
     const commentContent = item.content || item.comment_text || '';
     const commentDate = item.createdAt || item.created_at || item.comment_date || '';
     
+    // Type-safe access to user properties
+    const profilePicture = (commentUser as any).profile_picture || (commentUser as any).avatar || 'https://via.placeholder.com/40';
+    const username = (commentUser as any).username || (commentUser as any).name || 'unknown';
+    
     return (
       <View style={styles.commentItem}>
         <Image
-          source={{ 
-            uri: commentUser.profile_picture || commentUser.avatar || 'https://via.placeholder.com/40' 
-          }}
+          source={{ uri: profilePicture }}
           style={styles.commentAvatar}
         />
         <View style={styles.commentContent}>
           <View style={styles.commentHeader}>
             <Text style={styles.commentUsername}>
-              @{commentUser.username || commentUser.name || 'unknown'}
+              @{username}
             </Text>
             {commentDate && (
               <Text style={styles.commentTime}>{formatTimeAgo(commentDate)}</Text>
@@ -279,20 +365,22 @@ export default function CommentsModal({
           style={[
             styles.overlayContainer,
             {
-              height: isExpanded ? EXPANDED_HEIGHT : INITIAL_HEIGHT,
               transform: [
                 { translateY: Animated.add(slideAnim, panY) }
               ],
             },
           ]}
-          {...panResponder.panHandlers}
         >
-          {/* Drag Handle */}
-          <View style={styles.dragHandleContainer}>
+          {/* Drag Handle - pan responder only on drag handle area */}
+          <View 
+            style={styles.dragHandleContainer}
+            {...panResponder.panHandlers}
+          >
             <View style={styles.dragHandle} />
             <TouchableOpacity 
               style={styles.expandButton}
               onPress={isExpanded ? collapseOverlay : expandOverlay}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <Feather 
                 name={isExpanded ? 'chevron-down' : 'chevron-up'} 
@@ -307,7 +395,15 @@ export default function CommentsModal({
             <Text style={styles.headerTitle}>
               {comments.length} {comments.length === 1 ? 'Comment' : 'Comments'}
             </Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+            <TouchableOpacity 
+              onPress={() => {
+                console.log('Close button pressed');
+                onClose();
+              }} 
+              style={styles.closeButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              activeOpacity={0.7}
+            >
               <Feather name="x" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -388,18 +484,43 @@ export default function CommentsModal({
                 placeholder="Add a comment..."
                 placeholderTextColor="#666"
                 value={commentText}
-                onChangeText={setCommentText}
+                onChangeText={(text) => {
+                  console.log('TextInput onChangeText:', text.length, 'chars');
+                  setCommentText(text);
+                }}
                 multiline
                 maxLength={500}
-                onSubmitEditing={submitComment}
+                blurOnSubmit={false}
+                returnKeyType="default"
               />
               <TouchableOpacity
                 style={[
                   styles.sendButton,
-                  { opacity: commentText.trim() ? 1 : 0.5 }
+                  { 
+                    opacity: commentText.trim() && !submitting ? 1 : 0.5,
+                  }
                 ]}
-                onPress={submitComment}
+                onPress={() => {
+                  const trimmedText = commentText.trim();
+                  console.log('Send button pressed', { 
+                    commentText: trimmedText, 
+                    length: trimmedText.length,
+                    submitting,
+                    hasText: !!trimmedText && trimmedText.length > 0
+                  });
+                  if (trimmedText && trimmedText.length > 0 && !submitting) {
+                    submitComment();
+                  } else {
+                    console.warn('Send button: Cannot submit - text is empty or already submitting', {
+                      trimmedText,
+                      length: trimmedText?.length,
+                      submitting
+                    });
+                  }
+                }}
                 disabled={!commentText.trim() || submitting}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                activeOpacity={0.7}
               >
                 {submitting ? (
                   <ActivityIndicator size="small" color="#000" />
@@ -436,8 +557,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: 'hidden',
-    maxHeight: EXPANDED_HEIGHT,
-    minHeight: INITIAL_HEIGHT,
+    height: EXPANDED_HEIGHT, // Fixed height - we use translateY to show/hide parts
     width: '100%',
     shadowColor: '#000',
     shadowOffset: {
@@ -478,6 +598,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#27272a',
     backgroundColor: '#18181b',
+    zIndex: 100,
   },
   headerTitle: {
     color: '#fff',
@@ -485,7 +606,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   closeButton: {
-    padding: 4,
+    padding: 8,
+    minWidth: 40,
+    minHeight: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
   },
   commentsList: {
     flex: 1,
@@ -609,13 +735,14 @@ const styles = StyleSheet.create({
     borderColor: '#27272a',
   },
   sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#60a5fa',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 2,
+    zIndex: 100,
   },
   loginPrompt: {
     paddingHorizontal: 16,

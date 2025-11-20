@@ -12,6 +12,8 @@ import {
   Modal,
   ScrollView,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Video, ResizeMode } from 'expo-av';
@@ -43,12 +45,13 @@ export default function PostDetailScreen() {
 
   const fetchPost = async () => {
     try {
+      setLoading(true);
       const response = await postsApi.getById(id as string);
       if (response.status === 'success' && response.data) {
         setPost(response.data);
       }
     } catch (error) {
-      console.error('Error fetching post:', error);
+      console.error('Error fetching post:', error);4
     } finally {
       setLoading(false);
     }
@@ -59,9 +62,12 @@ export default function PostDetailScreen() {
       const response = await postsApi.getComments(id as string);
       if (response.status === 'success' && response.data?.comments) {
         setComments(response.data.comments);
+      } else {
+        setComments([]);
       }
     } catch (error) {
       console.error('Error fetching comments:', error);
+      setComments([]);
     }
   };
 
@@ -125,12 +131,16 @@ export default function PostDetailScreen() {
     setCommentLoading(true);
     try {
       const response = await postsApi.addComment(id as string, commentText);
-      if (response.status === 'success' && response.data?.comment?.length) {
-        setComments([response.data.comment[0], ...comments]);
+      if (response.status === 'success') {
+        // Refresh comments after adding
+        await fetchComments();
         setCommentText('');
+      } else {
+        Alert.alert('Error', response.message || 'Failed to add comment');
       }
     } catch (error) {
       console.error('Error adding comment:', error);
+      Alert.alert('Error', 'Failed to add comment. Please try again.');
     } finally {
       setCommentLoading(false);
     }
@@ -167,13 +177,29 @@ export default function PostDetailScreen() {
     );
   }
 
-  const mediaUrl = post.video_url || post.image || '';
-  const isVideo = !!post.video_url;
+  // Get media URL with fallbacks and validation
+  const getMediaUrl = () => {
+    return post.video_url || post.videoUrl || post.image || post.imageUrl || post.fullUrl || null;
+  };
+  
+  const mediaUrl = getMediaUrl();
+  const hasValidMedia = mediaUrl && mediaUrl.trim() !== '';
+  const isVideo = !!(post.video_url || post.videoUrl);
   const isLiked = likedPosts.has(post.id);
   const isFollowing = followedUsers.has(post.user?.id || '');
+  
+  // Get avatar URL with validation
+  const getAvatarUrl = (user: any) => {
+    const url = user?.profile_picture || user?.avatar || user?.authorProfilePicture || null;
+    return url && url.trim() !== '' ? url : 'https://via.placeholder.com/32';
+  };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+    >
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.headerBack}>
@@ -182,10 +208,10 @@ export default function PostDetailScreen() {
         
         <View style={styles.headerUserInfo}>
           <Image
-            source={{ uri: post.user?.profile_picture || 'https://via.placeholder.com/32' }}
+            source={{ uri: getAvatarUrl(post.user) }}
             style={styles.headerAvatar}
           />
-          <Text style={styles.headerUsername}>@{post.user?.username || 'unknown'}</Text>
+          <Text style={styles.headerUsername}>@{post.user?.username || post.user?.name || 'unknown'}</Text>
           
           {user && user.id !== post.user?.id && (
             <TouchableOpacity 
@@ -213,20 +239,27 @@ export default function PostDetailScreen() {
 
       {/* Media */}
       <View style={styles.mediaContainer}>
-        <View style={styles.mediaWrapper}>
-          {isVideo ? (
-            <Video
-              source={{ uri: mediaUrl }}
-              style={styles.media}
-              resizeMode={ResizeMode.CONTAIN}
-              useNativeControls
-              shouldPlay
-              isLooping
-            />
-          ) : (
-            <Image source={{ uri: mediaUrl }} style={styles.media} resizeMode="contain" />
-          )}
-        </View>
+        {hasValidMedia ? (
+          <View style={styles.mediaWrapper}>
+            {isVideo ? (
+              <Video
+                source={{ uri: mediaUrl! }}
+                style={styles.media}
+                resizeMode={ResizeMode.CONTAIN}
+                useNativeControls
+                shouldPlay
+                isLooping
+              />
+            ) : (
+              <Image source={{ uri: mediaUrl! }} style={styles.media} resizeMode="contain" />
+            )}
+          </View>
+        ) : (
+          <View style={styles.noMediaContainer}>
+            <Feather name="image" size={48} color="#666" />
+            <Text style={styles.noMediaText}>No media available</Text>
+          </View>
+        )}
       </View>
 
       {/* Actions Bar */}
@@ -251,53 +284,66 @@ export default function PostDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Caption */}
-      <View style={styles.captionContainer}>
-        <Text style={styles.caption}>{post.caption || post.description || ''}</Text>
-        {post.category && (
-          <TouchableOpacity 
-            style={styles.categoryBadge}
-            onPress={() => router.push({
-              pathname: '/category/[name]',
-              params: { name: typeof post.category === 'string' ? post.category : post.category.name }
-            })}
-          >
-            <Text style={styles.categoryText}>
-              #{typeof post.category === 'string' ? post.category : post.category.name}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Comments */}
-      <View style={styles.commentsSection}>
-        <Text style={styles.commentsTitle}>Comments</Text>
-        
-        <FlatList
-          data={comments}
-          renderItem={({ item }) => (
-            <View style={styles.commentItem}>
-              <Image
-                source={{ uri: item.User?.avatar || 'https://via.placeholder.com/32' }}
-                style={styles.commentAvatar}
-              />
-              <View style={styles.commentContent}>
-                <Text style={styles.commentUsername}>
-                  {item.User?.name || item.User?.username || 'unknown'}
-                </Text>
-                <Text style={styles.commentText}>{item.comment_text || ''}</Text>
-                <Text style={styles.commentDate}>
-                  {item.comment_date ? new Date(item.comment_date).toLocaleDateString() : ''}
-                </Text>
-              </View>
-            </View>
+      {/* Post Info and Comments - Scrollable */}
+      <ScrollView 
+        style={styles.scrollContent}
+        contentContainerStyle={styles.scrollContentContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Caption */}
+        <View style={styles.captionContainer}>
+          <Text style={styles.caption}>{post.caption || post.description || post.content || ''}</Text>
+          {post.category && (
+            <TouchableOpacity 
+              style={styles.categoryBadge}
+              onPress={() => router.push({
+                pathname: '/category/[name]',
+                params: { name: typeof post.category === 'string' ? post.category : post.category.name }
+              })}
+            >
+              <Text style={styles.categoryText}>
+                #{typeof post.category === 'string' ? post.category : post.category.name}
+              </Text>
+            </TouchableOpacity>
           )}
-          keyExtractor={(item, index) => item.comment_id?.toString() || `comment-${index}`}
-          ListEmptyComponent={
+          {(post.createdAt || post.uploadDate) && (
+            <Text style={styles.postDate}>
+              {new Date(post.createdAt || post.uploadDate || '').toLocaleDateString()}
+            </Text>
+          )}
+        </View>
+
+        {/* Comments */}
+        <View style={styles.commentsSection}>
+          <Text style={styles.commentsTitle}>Comments ({comments.length})</Text>
+          
+          {comments.length > 0 ? (
+            comments.map((item, index) => (
+              <View key={item.comment_id?.toString() || `comment-${index}`} style={styles.commentItem}>
+                <Image
+                  source={{ uri: getAvatarUrl(item.User || item.user) }}
+                  style={styles.commentAvatar}
+                />
+                <View style={styles.commentContent}>
+                  <Text style={styles.commentUsername}>
+                    {item.User?.name || item.User?.username || item.user?.name || item.user?.username || 'unknown'}
+                  </Text>
+                  <Text style={styles.commentText}>
+                    {item.comment_text || item.content || item.comment || ''}
+                  </Text>
+                  <Text style={styles.commentDate}>
+                    {item.comment_date || item.createdAt || item.created_at 
+                      ? new Date(item.comment_date || item.createdAt || item.created_at).toLocaleDateString() 
+                      : ''}
+                  </Text>
+                </View>
+              </View>
+            ))
+          ) : (
             <Text style={styles.noComments}>No comments yet. Be the first to comment!</Text>
-          }
-        />
-      </View>
+          )}
+        </View>
+      </ScrollView>
 
       {/* Comment Input */}
       <View style={[styles.commentInputContainer, { paddingBottom: insets.bottom + 12 }]}>
@@ -368,7 +414,7 @@ export default function PostDetailScreen() {
           Alert.alert('Reported', 'Thank you for reporting this content.');
         }}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -447,14 +493,13 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   mediaContainer: {
-    flex: 1,
+    height: 400,
     backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
   },
   mediaWrapper: {
-    flex: 1,
     width: '100%',
     height: '100%',
     justifyContent: 'center',
@@ -464,6 +509,17 @@ const styles = StyleSheet.create({
   media: {
     width: '100%',
     height: '100%',
+  },
+  noMediaContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  noMediaText: {
+    color: '#666',
+    fontSize: 14,
+    marginTop: 12,
   },
   actionsBar: {
     flexDirection: 'row',
@@ -482,6 +538,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: 6,
   },
+  scrollContent: {
+    flex: 1,
+  },
+  scrollContentContainer: {
+    paddingBottom: 20,
+  },
   captionContainer: {
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -492,6 +554,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 8,
+  },
+  postDate: {
+    color: '#666',
+    fontSize: 12,
+    marginTop: 8,
   },
   categoryBadge: {
     alignSelf: 'flex-start',
@@ -506,8 +573,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   commentsSection: {
-    flex: 1,
     backgroundColor: '#000',
+    paddingBottom: 16,
   },
   commentsTitle: {
     color: '#fff',
@@ -515,6 +582,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
   },
   commentItem: {
     flexDirection: 'row',

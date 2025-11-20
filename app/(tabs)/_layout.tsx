@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tabs } from 'expo-router';
+import { Tabs, router } from 'expo-router';
 import { View, TouchableOpacity, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -38,12 +38,12 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
           if (!isFocused) navigation.navigate(route.name);
         };
 
-        // Center create button
+        // Center create button - opens camera
         if (idx === 2) {
           return (
             <View key={route.key} style={{ flex: 1, alignItems: 'center' }}>
               <TouchableOpacity
-                onPress={onPress}
+                onPress={() => router.push('/camera')}
                 activeOpacity={0.8}
                 style={{
                   width: 48,
