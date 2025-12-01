@@ -1,4 +1,4 @@
-import { EventEmitter } from 'events';
+import { SimpleEventEmitter } from './simple-event-emitter';
 
 export interface WebSocketMessage {
   type: string;
@@ -38,7 +38,7 @@ export interface NotificationUpdate {
   };
 }
 
-class WebSocketService extends EventEmitter {
+class WebSocketService extends SimpleEventEmitter {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;

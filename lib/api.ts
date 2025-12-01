@@ -358,9 +358,9 @@ export const postsApi = {
     }
   },
 
-  getComments: async (postId: string): Promise<ApiResponse<{ comments: any[]; pagination?: any }>> => {
+  getComments: async (postId: string, page = 1, limit = 20): Promise<ApiResponse<{ comments: any[]; pagination?: any }>> => {
     try {
-      const response = await apiClient.get(`/api/posts/${postId}/comments`);
+      const response = await apiClient.get(`/api/posts/${postId}/comments?page=${page}&limit=${limit}`);
       return response.data;
     } catch (error: any) {
       console.error('Get comments API error:', error);
@@ -652,15 +652,41 @@ export const likesApi = {
         },
       };
     } catch (error: any) {
+      const status = error.response?.status;
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to toggle like';
+      
+      // Handle 404 (Post not found) gracefully - don't log as error
+      if (status === 404) {
+        console.warn('Post not found for like toggle:', postId);
+        return {
+          status: 'error',
+          message: 'Post not found',
+          data: { isLiked: false, likeCount: 0 },
+        } as any;
+      }
+      
+      // Handle network errors gracefully
+      if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network')) {
+        console.warn('Network error during like toggle:', postId);
+        return {
+          status: 'error',
+          message: 'Network error. Please check your connection.',
+          data: { isLiked: false, likeCount: 0 },
+        } as any;
+      }
+      
+      // Log other errors
       console.error('Toggle like API error:', {
-        message: error.message,
-        status: error.response?.status,
+        message: errorMessage,
+        status: status,
         data: error.response?.data,
-        url: error.config?.url
+        url: error.config?.url,
+        postId
       });
+      
       return {
         status: 'error',
-        message: error.response?.data?.message || 'Failed to toggle like',
+        message: errorMessage,
         data: { isLiked: false, likeCount: 0 },
       } as any;
     }
@@ -678,10 +704,33 @@ export const likesApi = {
         },
       };
     } catch (error: any) {
+      const status = error.response?.status;
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to get like status';
+      
+      // Handle 404 (Post not found) gracefully - don't log as error
+      if (status === 404) {
+        console.warn('Post not found for like status check:', postId);
+        return {
+          status: 'error',
+          message: 'Post not found',
+          data: { isLiked: false, likeCount: 0 },
+        } as any;
+      }
+      
+      // Handle network errors gracefully
+      if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network')) {
+        console.warn('Network error during like status check:', postId);
+        return {
+          status: 'error',
+          message: 'Network error. Please check your connection.',
+          data: { isLiked: false, likeCount: 0 },
+        } as any;
+      }
+      
       console.error('Get like status API error:', error);
       return {
         status: 'error',
-        message: error.response?.data?.message || 'Failed to get like status',
+        message: errorMessage,
         data: { isLiked: false, likeCount: 0 },
       } as any;
     }

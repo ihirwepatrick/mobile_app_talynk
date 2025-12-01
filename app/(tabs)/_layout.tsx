@@ -38,12 +38,12 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
           if (!isFocused) navigation.navigate(route.name);
         };
 
-        // Center create button - opens camera
+        // Center create button - opens create tab
         if (idx === 2) {
           return (
             <View key={route.key} style={{ flex: 1, alignItems: 'center' }}>
               <TouchableOpacity
-                onPress={() => router.push('/camera')}
+                onPress={onPress}
                 activeOpacity={0.8}
                 style={{
                   width: 48,

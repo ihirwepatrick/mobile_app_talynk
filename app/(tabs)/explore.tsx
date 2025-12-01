@@ -132,8 +132,11 @@ export default function ExploreScreen() {
   };
 
   const renderPost = ({ item }: { item: Post }) => {
-    const mediaUrl = item.video_url || item.image || '';
-    const isVideo = !!item.video_url;
+    // For videos, use the image/thumbnail field as preview, fallback to video_url
+    const thumbnailUrl = item.image || (item as any).thumbnail || '';
+    const videoUrl = item.video_url || '';
+    const isVideo = !!videoUrl;
+    const previewUrl = isVideo ? (thumbnailUrl || videoUrl) : (item.image || '');
 
     return (
       <TouchableOpacity 
@@ -143,18 +146,16 @@ export default function ExploreScreen() {
           params: { id: item.id }
         })}
       >
-        {isVideo ? (
-          <Video
-            source={{ uri: mediaUrl }}
+        {previewUrl ? (
+          <Image 
+            source={{ uri: previewUrl }} 
             style={styles.postMedia}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={false}
-            isMuted={true}
-            useNativeControls={false}
-            posterStyle={{ resizeMode: 'cover' }}
+            resizeMode="cover"
           />
         ) : (
-          <Image source={{ uri: mediaUrl }} style={styles.postMedia} />
+          <View style={[styles.postMedia, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
+            <MaterialIcons name="broken-image" size={32} color="#666" />
+          </View>
         )}
         
         <View style={styles.postOverlay}>

@@ -80,6 +80,10 @@ export default function CommentsModal({
   const insets = useSafeAreaInsets();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [error, setError] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -92,7 +96,10 @@ export default function CommentsModal({
     console.log('CommentsModal useEffect - visible:', visible, 'postId:', postId);
     if (visible && postId) {
       console.log('Fetching comments for postId:', postId);
-      fetchComments();
+      setCurrentPage(1);
+      setHasMore(true);
+      setError(null);
+      fetchComments(1, true);
       // Reset to collapsed state when opened
       setIsExpanded(false);
       slideAnim.setValue(EXPANDED_HEIGHT - INITIAL_HEIGHT); // Start translated up (collapsed)
@@ -100,6 +107,10 @@ export default function CommentsModal({
       // Reset when closed
       setIsExpanded(false);
       slideAnim.setValue(EXPANDED_HEIGHT - INITIAL_HEIGHT);
+      setComments([]);
+      setCurrentPage(1);
+      setHasMore(true);
+      setError(null);
     }
   }, [visible, postId]);
 
@@ -160,28 +171,66 @@ export default function CommentsModal({
     panY.setValue(0);
   };
 
-  const fetchComments = async () => {
+  const fetchComments = async (page = 1, isInitial = false) => {
     if (!postId) {
       console.warn('fetchComments called without postId');
       return;
     }
     try {
-      setLoading(true);
-      console.log('Calling postsApi.getComments with postId:', postId);
-      const response = await postsApi.getComments(postId);
+      if (isInitial) {
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
+      setError(null);
+      
+      console.log('Calling postsApi.getComments with postId:', postId, 'page:', page);
+      const response = await postsApi.getComments(postId, page, 20); // Load 20 comments per page
       console.log('Comments API response:', response);
+      
       if (response.status === 'success' && response.data?.comments) {
-        setComments(response.data.comments);
-        console.log('Comments loaded:', response.data.comments.length);
+        const newComments = Array.isArray(response.data.comments) ? response.data.comments : [];
+        
+        // Check if there are more comments
+        const pagination = response.data.pagination || {};
+        const hasMoreData = pagination.hasNextPage !== false && newComments.length === 20;
+        setHasMore(hasMoreData);
+        
+        if (page === 1 || isInitial) {
+          setComments(newComments);
+        } else {
+          setComments(prev => [...prev, ...newComments]);
+        }
+        console.log('Comments loaded:', newComments.length, 'Total:', page === 1 ? newComments.length : comments.length + newComments.length);
       } else {
         console.log('No comments in response or error status');
+        if (page === 1) {
+          setComments([]);
+        }
+        setHasMore(false);
+      }
+    } catch (error: any) {
+      console.error('Error fetching comments:', error);
+      const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR' || !error?.response;
+      setError(isNetworkError 
+        ? 'No internet connection. Please check your network and try again.'
+        : 'Failed to load comments. Please try again.');
+      
+      if (page === 1) {
         setComments([]);
       }
-    } catch (error) {
-      console.error('Error fetching comments:', error);
-      setComments([]);
+      setHasMore(false);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
+  const loadMoreComments = () => {
+    if (!loadingMore && hasMore && !loading) {
+      const nextPage = currentPage + 1;
+      setCurrentPage(nextPage);
+      fetchComments(nextPage, false);
     }
   };
 
@@ -425,11 +474,25 @@ export default function CommentsModal({
                 { paddingBottom: insets.bottom + 100 }
               ]}
               showsVerticalScrollIndicator={false}
+              onEndReached={loadMoreComments}
+              onEndReachedThreshold={0.5}
               ListEmptyComponent={
                 loading ? (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#60a5fa" />
                     <Text style={styles.loadingText}>Loading comments...</Text>
+                  </View>
+                ) : error ? (
+                  <View style={styles.emptyContainer}>
+                    <Feather name="alert-circle" size={48} color="#666" />
+                    <Text style={styles.emptyText}>Error loading comments</Text>
+                    <Text style={styles.emptySubtext}>{error}</Text>
+                    <TouchableOpacity 
+                      style={styles.retryButton}
+                      onPress={() => fetchComments(1, true)}
+                    >
+                      <Text style={styles.retryButtonText}>Retry</Text>
+                    </TouchableOpacity>
                   </View>
                 ) : (
                   <View style={styles.emptyContainer}>
@@ -438,6 +501,14 @@ export default function CommentsModal({
                     <Text style={styles.emptySubtext}>Be the first to comment!</Text>
                   </View>
                 )
+              }
+              ListFooterComponent={
+                loadingMore ? (
+                  <View style={styles.loadMoreContainer}>
+                    <ActivityIndicator size="small" color="#60a5fa" />
+                    <Text style={styles.loadMoreText}>Loading more comments...</Text>
+                  </View>
+                ) : null
               }
             />
           ) : (
@@ -702,6 +773,28 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 14,
     marginTop: 4,
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#60a5fa',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  loadMoreContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadMoreText: {
+    color: '#999',
+    fontSize: 14,
+    marginTop: 8,
   },
   inputContainer: {
     flexDirection: 'row',

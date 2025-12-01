@@ -18,7 +18,7 @@ import {
 import { useLocalSearchParams, router } from 'expo-router';
 import { Video, ResizeMode } from 'expo-av';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { postsApi, followsApi } from '@/lib/api';
+import { postsApi, followsApi, likesApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -81,17 +81,28 @@ export default function PostDetailScreen() {
     updateLikedPosts(post.id, !isCurrentlyLiked);
 
     try {
-      const response = isCurrentlyLiked 
-        ? await postsApi.unlike(post.id)
-        : await postsApi.like(post.id);
+      const response = await likesApi.toggle(post.id);
       
-      if (response.status === 'success') {
+      if (response.status === 'success' && response.data) {
         setPost((prev: any) => ({
           ...prev,
-          likes: response.data?.likeCount || (isCurrentlyLiked ? (prev.likes || 1) - 1 : (prev.likes || 0) + 1)
+          likes: response.data.likeCount || (prev.likes || 0)
         }));
+      } else {
+        // Revert on error (unless it's post not found)
+        const isPostNotFound = response.message?.includes('not found') || response.message?.includes('Post not found');
+        if (!isPostNotFound) {
+          updateLikedPosts(post.id, isCurrentlyLiked); // Revert
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
+      // Revert on error
+      updateLikedPosts(post.id, isCurrentlyLiked);
+      
+      const isPostNotFound = error?.message?.includes('not found') || error?.message?.includes('Post not found');
+      if (!isPostNotFound) {
+        console.error('Like toggle error:', error);
+      }
       updateLikedPosts(post.id, isCurrentlyLiked);
     }
   };

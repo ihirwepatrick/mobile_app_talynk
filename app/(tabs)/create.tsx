@@ -148,7 +148,7 @@ export default function CreatePostScreen() {
   const [caption, setCaption] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
-  const [selectedMedia, setSelectedMedia] = useState<{ uri: string; type: 'image' | 'video'; name: string; mimeType?: string; thumbnailUri?: string } | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<{ uri: string; type: 'image' | 'video'; name: string; mimeType?: string; thumbnailUri?: string; fileSize?: number } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -302,7 +302,7 @@ export default function CreatePostScreen() {
     }
   }, [uploadProgress, uploading]);
 
-  // Handle camera/gallery params
+  // Handle gallery params (if coming from external source)
   useEffect(() => {
     if (params.videoUri) {
       const fileName = params.videoUri.split('/').pop() || 'video.mp4';
@@ -317,10 +317,6 @@ export default function CreatePostScreen() {
   }, [params.videoUri, params.thumbnailUri]);
 
   // --- MEDIA PICKERS ---
-  const openCamera = () => {
-    router.push('/camera');
-  };
-
   const pickMedia = async (mediaType: 'image' | 'video') => {
     let permissionResult;
     if (mediaType === 'image') {
@@ -354,19 +350,46 @@ export default function CreatePostScreen() {
         }
       }
       
+      // Check file size - use multiple methods for accuracy
       let fileSize = 0;
-      try {
-        const fileInfo = await FileSystem.getInfoAsync(asset.uri);
-        if (fileInfo.exists && typeof fileInfo.size === 'number') {
-          fileSize = fileInfo.size;
+      
+      // First try to get size from asset directly (most reliable)
+      if (asset.fileSize && asset.fileSize > 0) {
+        fileSize = asset.fileSize;
+      } else {
+        // Fallback to FileSystem
+        try {
+          const fileInfo = await FileSystem.getInfoAsync(asset.uri);
+          if (fileInfo.exists && typeof fileInfo.size === 'number' && fileInfo.size > 0) {
+            fileSize = fileInfo.size;
+          }
+        } catch (e) {
+          console.warn('Could not get file size:', e);
         }
-      } catch (e) {
-        fileSize = 0;
       }
       
-      if (fileSize > 50 * 1024 * 1024) {
-        Alert.alert('File too large', 'Please select a file smaller than 50MB.');
+      // Strict 50MB limit (50 * 1024 * 1024 bytes)
+      const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB in bytes
+      
+      if (fileSize > MAX_FILE_SIZE) {
+        const sizeInMB = (fileSize / (1024 * 1024)).toFixed(2);
+        Alert.alert(
+          'File Too Large',
+          `The selected file is ${sizeInMB} MB, which exceeds the maximum allowed size of 50 MB. Please select a smaller file.`,
+          [{ text: 'OK' }]
+        );
         return;
+      }
+      
+      // Warn if file is close to limit (above 45MB but under 50MB)
+      if (fileSize > 45 * 1024 * 1024 && fileSize <= MAX_FILE_SIZE) {
+        const sizeInMB = (fileSize / (1024 * 1024)).toFixed(2);
+        // Show warning but allow user to proceed
+        Alert.alert(
+          'Large File Warning',
+          `The selected file is ${sizeInMB} MB. Upload may take longer.`,
+          [{ text: 'OK' }]
+        );
       }
 
       // Generate thumbnail for videos
@@ -381,6 +404,7 @@ export default function CreatePostScreen() {
         name: fileName, 
         mimeType,
         thumbnailUri: thumbnailUri || undefined,
+        fileSize: fileSize > 0 ? fileSize : undefined,
       });
     }
   };
@@ -388,7 +412,7 @@ export default function CreatePostScreen() {
   const removeMedia = () => setSelectedMedia(null);
 
   // --- VALIDATION ---
-  const validate = () => {
+  const validate = async () => {
     const newErrors: { [k: string]: string } = {};
     if (!title.trim()) newErrors.title = 'Title is required';
     else if (title.length < 5) newErrors.title = 'Title must be at least 5 characters';
@@ -396,7 +420,36 @@ export default function CreatePostScreen() {
     else if (caption.length < 10) newErrors.caption = 'Caption must be at least 10 characters';
     if (!selectedGroup) newErrors.group = 'Category group is required';
     if (!selectedCategoryId) newErrors.category = 'Specific category is required';
-    if (!selectedMedia) newErrors.media = 'Please select an image or video';
+    if (!selectedMedia) {
+      newErrors.media = 'Please select an image or video';
+    } else {
+      // Double-check file size before upload
+      const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+      let fileSize = 0;
+      
+      try {
+        // Try to get size from FileSystem
+        const fileInfo = await FileSystem.getInfoAsync(selectedMedia.uri);
+        if (fileInfo.exists && typeof fileInfo.size === 'number' && fileInfo.size > 0) {
+          fileSize = fileInfo.size;
+        }
+      } catch (e) {
+        console.warn('Could not verify file size:', e);
+      }
+      
+      if (fileSize > MAX_FILE_SIZE) {
+        const sizeInMB = (fileSize / (1024 * 1024)).toFixed(2);
+        Alert.alert(
+          'File Too Large',
+          `The selected file (${sizeInMB} MB) exceeds the maximum allowed size of 50 MB. Please select a smaller file.`,
+          [{ text: 'OK' }]
+        );
+        newErrors.media = 'File size exceeds 50 MB limit';
+        setErrors(newErrors);
+        return false;
+      }
+    }
+    
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -418,7 +471,8 @@ export default function CreatePostScreen() {
       return;
     }
 
-    if (!validate()) return;
+    const isValid = await validate();
+    if (!isValid) return;
     
     // Request notification permissions
     const hasPermission = await uploadNotificationService.requestPermissions();
@@ -828,14 +882,7 @@ export default function CreatePostScreen() {
                       onPress={() => pickMedia('image')}
                     >
                       <MaterialIcons name="photo-library" size={20} color={C.buttonText} />
-                      <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Gallery</Text>
-            </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={[styles.mediaButton, { backgroundColor: C.primary }]} 
-                      onPress={openCamera}
-                    >
-                      <MaterialIcons name="videocam" size={20} color={C.buttonText} />
-                      <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Camera</Text>
+                      <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Image</Text>
             </TouchableOpacity>
                     <TouchableOpacity 
                       style={[styles.mediaButton, { backgroundColor: C.primary }]} 
@@ -879,6 +926,11 @@ export default function CreatePostScreen() {
                   <Text style={[styles.mediaFileName, { color: C.textSecondary }]}>
                     {selectedMedia.name}
                   </Text>
+                  {selectedMedia.fileSize && (
+                    <Text style={[styles.mediaFileSize, { color: C.textSecondary }]}>
+                      {(selectedMedia.fileSize / (1024 * 1024)).toFixed(2)} MB
+                    </Text>
+                  )}
                 </View>
               )}
             </View>
@@ -1109,6 +1161,12 @@ const styles = StyleSheet.create({
   mediaFileName: {
     fontSize: 12,
     textAlign: 'center',
+  },
+  mediaFileSize: {
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 4,
+    opacity: 0.7,
   },
   createButton: {
     flexDirection: 'row',

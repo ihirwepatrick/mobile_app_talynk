@@ -75,7 +75,6 @@ function RootLayoutNav() {
               <Stack.Screen name="settings" options={{ headerShown: false }} />
               <Stack.Screen name="search" options={{ headerShown: false }} />
               <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
-              <Stack.Screen name="camera" options={{ headerShown: false }} />
             </Stack>
             <StatusBar style="light" />
           </ThemeProvider>

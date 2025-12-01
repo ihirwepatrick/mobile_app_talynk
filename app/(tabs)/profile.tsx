@@ -16,12 +16,16 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
-import { userApi, postsApi } from '@/lib/api';
+import { userApi, postsApi, likesApi } from '@/lib/api';
 import { Post } from '@/types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { Video, ResizeMode } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditProfileModal } from '@/components/EditProfileModal';
+import DotsSpinner from '@/components/DotsSpinner';
+import { useLikesManager } from '@/lib/hooks/use-likes-manager';
+import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
+import { addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -34,6 +38,11 @@ const PROFILE_TABS = [
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
+  const dispatch = useAppDispatch();
+  const likedPosts = useAppSelector(state => state.likes.likedPosts);
+  const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
+  const likesManager = useLikesManager();
+  
   const [profile, setProfile] = useState<any>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +58,14 @@ export default function ProfileScreen() {
   const [videoError, setVideoError] = useState(false);
   const [videoLoading, setVideoLoading] = useState(false);
   const [useNativeControls, setUseNativeControls] = useState(false);
+  const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
+  
+  // Error and loading states
+  const [error, setError] = useState<{ type: 'network' | 'server' | 'unknown'; message: string } | null>(null);
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+  const [likingPostId, setLikingPostId] = useState<string | null>(null);
+  
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -68,8 +85,11 @@ export default function ProfileScreen() {
     }
   }, [postModalVisible]);
 
-  const loadProfile = async () => {
+  const loadProfile = async (showLoading = false) => {
     try {
+      setError(null);
+      if (showLoading) setLoadingProfile(true);
+      
       const response = await userApi.getProfile();
       if (response.status === 'success' && response.data) {
         const userData = (response.data as any).user || response.data;
@@ -87,16 +107,29 @@ export default function ProfileScreen() {
           username: userData.username,
           id: userData.id,
         });
+      } else {
+        setError({ type: 'server', message: response.message || 'Failed to load profile' });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading profile:', error);
+      const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR' || !error?.response;
+      setError({
+        type: isNetworkError ? 'network' : 'server',
+        message: isNetworkError 
+          ? 'No internet connection. Please check your network and try again.' 
+          : error?.message || 'Failed to load profile. Please try again.'
+      });
     } finally {
       setLoading(false);
+      setLoadingProfile(false);
     }
   };
 
-  const loadPosts = async () => {
+  const loadPosts = async (showLoading = false) => {
     try {
+      setError(null);
+      if (showLoading) setLoadingPosts(true);
+      
       const response = await userApi.getOwnPosts();
       if (response.status === 'success' && response.data?.posts) {
         let filteredPosts = response.data.posts;
@@ -119,17 +152,168 @@ export default function ProfileScreen() {
         setPosts(filteredPosts);
         
         // Calculate total likes
-        const likes = filteredPosts.reduce((sum: number, post: any) => sum + (post.likes || 0), 0);
+        const likes = filteredPosts.reduce((sum: number, post: any) => {
+          const cachedCount = postLikeCounts[post.id];
+          return sum + (cachedCount !== undefined ? cachedCount : (post.likes || 0));
+        }, 0);
         setTotalLikes(likes);
+      } else {
+        setError({ type: 'server', message: response.message || 'Failed to load posts' });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading posts:', error);
+      const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR' || !error?.response;
+      setError({
+        type: isNetworkError ? 'network' : 'server',
+        message: isNetworkError 
+          ? 'No internet connection. Please check your network and try again.' 
+          : error?.message || 'Failed to load posts. Please try again.'
+      });
+    } finally {
+      setLoadingPosts(false);
     }
   };
 
   const onRefresh = () => {
     setRefreshing(true);
-    Promise.all([loadProfile(), loadPosts()]).finally(() => setRefreshing(false));
+    setError(null);
+    Promise.all([loadProfile(true), loadPosts(true)]).finally(() => setRefreshing(false));
+  };
+
+  // Optimistic like handler
+  const handleLike = async (postId: string) => {
+    if (!user) {
+      Alert.alert(
+        'Login Required',
+        'Please log in to like posts.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Login', onPress: () => router.push('/auth/login') }
+        ]
+      );
+      return;
+    }
+
+    if (likingPostId === postId) return; // Prevent double clicks
+    setLikingPostId(postId);
+
+    const isCurrentlyLiked = likedPosts.includes(postId);
+    const currentCount = postLikeCounts[postId] || posts.find(p => p.id === postId)?.likes || 0;
+
+    // Optimistic update - update UI immediately
+    const newIsLiked = !isCurrentlyLiked;
+    const newCount = newIsLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
+
+    if (newIsLiked) {
+      dispatch(addLikedPost(postId));
+    } else {
+      dispatch(removeLikedPost(postId));
+    }
+    dispatch(setPostLikeCount({ postId, count: newCount }));
+
+    // Update local posts array
+    setPosts(prevPosts => 
+      prevPosts.map(post => 
+        post.id === postId 
+          ? { ...post, likes: newCount }
+          : post
+      )
+    );
+
+    // Update total likes
+    setTotalLikes(prev => newIsLiked ? prev + 1 : Math.max(0, prev - 1));
+
+    // Background API call
+    try {
+      const response = await likesApi.toggle(postId);
+      
+      if (response.status === 'success' && response.data) {
+        // Update with server response
+        const serverIsLiked = response.data.isLiked;
+        const serverLikeCount = response.data.likeCount;
+
+        if (serverIsLiked) {
+          dispatch(addLikedPost(postId));
+        } else {
+          dispatch(removeLikedPost(postId));
+        }
+        dispatch(setPostLikeCount({ postId, count: serverLikeCount }));
+
+        // Update local posts array with server response
+        setPosts(prevPosts => 
+          prevPosts.map(post => 
+            post.id === postId 
+              ? { ...post, likes: serverLikeCount }
+              : post
+          )
+        );
+
+        // Update total likes with server response
+        const diff = serverLikeCount - newCount;
+        setTotalLikes(prev => Math.max(0, prev + diff));
+      } else {
+        // Revert on error
+        if (isCurrentlyLiked) {
+          dispatch(addLikedPost(postId));
+        } else {
+          dispatch(removeLikedPost(postId));
+        }
+        dispatch(setPostLikeCount({ postId, count: currentCount }));
+        setPosts(prevPosts => 
+          prevPosts.map(post => 
+            post.id === postId 
+              ? { ...post, likes: currentCount }
+              : post
+          )
+        );
+        setTotalLikes(prev => {
+          const diff = currentCount - newCount;
+          return Math.max(0, prev + diff);
+        });
+        
+        // Only show alert for non-404 errors (post not found should be silent)
+        const isPostNotFound = response.message?.includes('not found') || response.message?.includes('Post not found');
+        if (!isPostNotFound) {
+          Alert.alert('Error', 'Failed to update like. Please try again.');
+        }
+      }
+    } catch (error: any) {
+      // Revert on error
+      if (isCurrentlyLiked) {
+        dispatch(addLikedPost(postId));
+      } else {
+        dispatch(removeLikedPost(postId));
+      }
+      dispatch(setPostLikeCount({ postId, count: currentCount }));
+      setPosts(prevPosts => 
+        prevPosts.map(post => 
+          post.id === postId 
+            ? { ...post, likes: currentCount }
+            : post
+        )
+      );
+      setTotalLikes(prev => {
+        const diff = currentCount - newCount;
+        return Math.max(0, prev + diff);
+      });
+
+      const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR';
+      const isPostNotFound = error?.message?.includes('not found') || error?.message?.includes('Post not found');
+      
+      // Only show alerts for network errors, not for post not found
+      if (isNetworkError) {
+        Alert.alert(
+          'Network Error',
+          'Unable to update like. Your action will be synced when connection is restored.',
+          [{ text: 'OK' }]
+        );
+      } else if (!isPostNotFound) {
+        // Silent fail for post not found, show alert for other errors
+        Alert.alert('Error', 'Failed to update like. Please try again.');
+      }
+    } finally {
+      setLikingPostId(null);
+    }
   };
 
   const handleVideoPlayPause = async () => {
@@ -154,29 +338,24 @@ export default function ProfileScreen() {
   };
 
   const handleVideoError = (error: any) => {
-    console.error('Video error:', error);
-    setVideoError(true);
-    setIsVideoPlaying(false);
-    setVideoLoading(false);
+    const errorMessage = error?.message || error?.toString() || '';
     
-    // Auto-fallback to native controls for decoder errors
-    if (error?.message?.includes('Decoder') || error?.message?.includes('decoder')) {
-      console.log('Decoder error detected, falling back to native controls');
-      setUseNativeControls(true);
-      setVideoError(false);
+    // Check for decoder errors - but we're already using native controls, so just log
+    if (errorMessage.includes('Decoder') || errorMessage.includes('decoder') || errorMessage.includes('OMX')) {
+      // Native controls should handle this better, but if it still fails, show error
+      console.warn('Video decoder error (using native controls):', errorMessage);
+      setVideoError(true);
+      setVideoLoading(false);
+      setIsVideoPlaying(false);
+    } else {
+      // Other errors (network, format, etc.)
+      console.error('Video error:', errorMessage);
+      setVideoError(true);
+      setIsVideoPlaying(false);
+      setVideoLoading(false);
     }
   };
 
-  const handleVideoLoadStart = () => {
-    console.log('Video loading started');
-    setVideoError(false);
-    setVideoLoading(true);
-  };
-
-  const handleVideoLoadEnd = () => {
-    console.log('Video loading completed');
-    setVideoLoading(false);
-  };
 
   const handlePlaybackStatusUpdate = (status: any) => {
     if (status.isLoaded) {
@@ -189,6 +368,7 @@ export default function ProfileScreen() {
     setVideoError(false);
     setVideoLoading(false);
     setUseNativeControls(false);
+    setDecoderErrorDetected(false);
     setVideoRef(null);
   };
 
@@ -212,8 +392,11 @@ export default function ProfileScreen() {
   };
 
   const renderPost = ({ item }: { item: Post }) => {
-    const mediaUrl = item.video_url || item.image || '';
-    const isVideo = !!item.video_url;
+    // For videos, use the image/thumbnail field as preview, fallback to video_url
+    const thumbnailUrl = item.image || (item as any).thumbnail || '';
+    const videoUrl = item.video_url || '';
+    const isVideo = !!videoUrl;
+    const previewUrl = isVideo ? (thumbnailUrl || videoUrl) : (item.image || '');
 
     return (
       <TouchableOpacity 
@@ -221,26 +404,25 @@ export default function ProfileScreen() {
         onPress={() => {
           setSelectedPost(item);
           resetVideoState();
+          // Start with native controls if it's a video to avoid decoder issues
+          if (item.video_url) {
+            setUseNativeControls(true);
+            setDecoderErrorDetected(false);
+          }
           setPostModalVisible(true);
         }}
         activeOpacity={0.8}
       >
-        {isVideo ? (
-          <Video
-            source={{ uri: mediaUrl }}
-            style={styles.postMedia}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={false}
-            isMuted={true}
-            useNativeControls={false}
-            posterStyle={{ resizeMode: 'cover' }}
-          />
-        ) : (
+        {previewUrl ? (
           <Image 
-            source={{ uri: mediaUrl }} 
+            source={{ uri: previewUrl }} 
             style={styles.postMedia}
             resizeMode="cover"
           />
+        ) : (
+          <View style={[styles.postMedia, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
+            <MaterialIcons name="broken-image" size={32} color="#666" />
+          </View>
         )}
         
         <View style={styles.postOverlay}>
@@ -515,8 +697,8 @@ export default function ProfileScreen() {
               <>
                 {/* Media */}
                 <View style={styles.postModalMedia}>
-                  {selectedPost.video_url ? (
-                    videoError ? (
+                  {selectedPost.video_url && selectedPost.video_url.trim() ? (
+                    videoError && !useNativeControls ? (
                       <View style={styles.videoErrorContainer}>
                         <MaterialIcons name="error-outline" size={48} color="#666" />
                         <Text style={styles.videoErrorText}>Video failed to load</Text>
@@ -524,16 +706,8 @@ export default function ProfileScreen() {
                           style={styles.retryButton}
                           onPress={() => {
                             setVideoError(false);
-                            resetVideoState();
-                          }}
-                        >
-                          <Text style={styles.retryButtonText}>Retry</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity 
-                          style={[styles.retryButton, { backgroundColor: '#10b981', marginTop: 8 }]}
-                          onPress={() => {
-                            setVideoError(false);
                             setUseNativeControls(true);
+                            setDecoderErrorDetected(true);
                             resetVideoState();
                           }}
                         >
@@ -541,73 +715,43 @@ export default function ProfileScreen() {
                         </TouchableOpacity>
                       </View>
                     ) : (
-                      <TouchableOpacity 
-                        style={styles.videoContainer}
-                        activeOpacity={1}
-                        onPress={handleVideoPlayPause}
-                      >
+                      <View style={styles.videoContainer}>
                         <Video
                           ref={setVideoRef}
                           source={{ 
-                            uri: selectedPost.video_url,
+                            uri: selectedPost.video_url.trim(),
                             headers: {
                               'User-Agent': 'Talynk-Mobile-App'
                             }
                           }}
                           style={styles.modalMedia}
                           resizeMode={ResizeMode.CONTAIN}
-                          useNativeControls={useNativeControls}
-                          shouldPlay={useNativeControls ? true : false}
+                          useNativeControls={true}
+                          shouldPlay={false}
                           isLooping={false}
                           isMuted={false}
                           volume={1.0}
                           rate={1.0}
                           shouldCorrectPitch={true}
-                          progressUpdateInterval={1000}
+                          progressUpdateIntervalMillis={1000}
                           onLoad={handleVideoLoad}
                           onError={handleVideoError}
-                          onLoadStart={handleVideoLoadStart}
-                          onLoadEnd={handleVideoLoadEnd}
                           onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-                          posterSource={{ uri: selectedPost.image || '' }}
-                          usePoster={true}
+                          posterSource={selectedPost.image && selectedPost.image.trim() ? { uri: selectedPost.image.trim() } : undefined}
+                          usePoster={!!selectedPost.image}
                         />
-                        {/* Play/Pause Overlay */}
-                        {!useNativeControls && (
-                          <View style={styles.videoOverlay}>
-                            {videoLoading ? (
-                              <View style={styles.loadingContainer}>
-                                <ActivityIndicator size="large" color="#60a5fa" />
-                                <Text style={styles.loadingText}>Loading video...</Text>
-                              </View>
-                            ) : (
-                              <TouchableOpacity 
-                                style={styles.playPauseButton}
-                                onPress={handleVideoPlayPause}
-                              >
-                                <MaterialIcons 
-                                  name={isVideoPlaying ? "pause" : "play-arrow"} 
-                                  size={48} 
-                                  color="#fff" 
-                                />
-                              </TouchableOpacity>
-                            )}
-                            {/* Fallback to native controls button */}
-                            <TouchableOpacity 
-                              style={styles.nativeControlsButton}
-                              onPress={() => setUseNativeControls(true)}
-                            >
-                              <MaterialIcons name="settings" size={20} color="#fff" />
-                            </TouchableOpacity>
-                          </View>
-                        )}
-                      </TouchableOpacity>
+                      </View>
                     )
-                  ) : (
+                  ) : selectedPost.image && selectedPost.image.trim() ? (
                     <Image 
-                      source={{ uri: selectedPost.image || '' }} 
+                      source={{ uri: selectedPost.image.trim() }} 
                       style={styles.modalMedia} 
                     />
+                  ) : (
+                    <View style={[styles.modalMedia, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
+                      <MaterialIcons name="broken-image" size={48} color="#666" />
+                      <Text style={styles.videoErrorText}>No media available</Text>
+                    </View>
                   )}
                 </View>
                 
@@ -984,10 +1128,6 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 14,
     fontWeight: '600',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   loadingText: {
     color: '#fff',

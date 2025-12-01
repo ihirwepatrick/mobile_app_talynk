@@ -1,6 +1,12 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
-import { setLikedPosts, setPostLikeCounts } from '@/lib/store/slices/likesSlice';
+import { 
+  setLikedPosts, 
+  setPostLikeCounts, 
+  addLikedPost, 
+  removeLikedPost, 
+  setPostLikeCount 
+} from '@/lib/store/slices/likesSlice';
 import { likesApi } from '@/lib/api';
 
 /**
@@ -10,7 +16,7 @@ import { likesApi } from '@/lib/api';
  * - Batch like-status fetching every 400ms
  * - Optimistic UI updates
  * - Minimal API traffic
- * - Smooth scrolling like detection
+ * - Smooth scrolling like detection,
  */
 export const useLikesManager = () => {
   const dispatch = useAppDispatch();
@@ -20,13 +26,20 @@ export const useLikesManager = () => {
   // Queue of post IDs that need like status checking
   const pendingPostIds = useRef<string[]>([]);
   const checkedPostIds = useRef<Set<string>>(new Set());
+  // Track posts with pending optimistic updates to prevent batch check overwrites
+  const pendingTogglePostIds = useRef<Set<string>>(new Set());
 
   /**
    * Add post to batch fetch queue when it becomes visible
    */
   const onPostVisible = useCallback((postId: string) => {
-    // Skip if already checked or already liked
-    if (checkedPostIds.current.has(postId) || likedPosts.includes(postId)) {
+    // Skip if already checked
+    if (checkedPostIds.current.has(postId)) {
+      return;
+    }
+
+    // Skip if there's a pending toggle (optimistic update in progress)
+    if (pendingTogglePostIds.current.has(postId)) {
       return;
     }
 
@@ -37,7 +50,7 @@ export const useLikesManager = () => {
 
     // Add to queue
     pendingPostIds.current.push(postId);
-  }, [likedPosts]);
+  }, []);
 
   /**
    * Batch fetch like status every 400ms
@@ -57,10 +70,17 @@ export const useLikesManager = () => {
         if (response.status === 'success' && response.data) {
           const liked: string[] = [];
           const counts: Record<string, number> = {};
+          const returnedPostIds = new Set<string>();
 
-          // Process response
+          // Process response - backend omits non-existent posts
           Object.entries(response.data).forEach(([postId, info]: [string, any]) => {
+            // Skip posts with pending optimistic updates
+            if (pendingTogglePostIds.current.has(postId)) {
+              return;
+            }
+
             if (info && typeof info === 'object' && 'isLiked' in info && 'likeCount' in info) {
+              returnedPostIds.add(postId);
               if (info.isLiked) {
                 liked.push(postId);
               }
@@ -69,20 +89,43 @@ export const useLikesManager = () => {
             }
           });
 
+          // Mark posts not in response as checked (they don't exist or were omitted)
+          // Skip posts with pending optimistic updates
+          batch.forEach(postId => {
+            if (pendingTogglePostIds.current.has(postId)) {
+              return;
+            }
+            if (!returnedPostIds.has(postId)) {
+              checkedPostIds.current.add(postId);
+              // Set default values for non-existent posts
+              counts[postId] = 0;
+            }
+          });
+
           // Update Redux store - merge with existing liked posts
+          // Add new liked posts that aren't already in the list
           if (liked.length > 0) {
-            const currentLiked = new Set([...likedPosts, ...liked]);
-            dispatch(setLikedPosts(Array.from(currentLiked)));
+            liked.forEach(postId => {
+              if (!likedPosts.includes(postId)) {
+                dispatch(addLikedPost(postId));
+              }
+            });
           }
 
+          // Update like counts
           if (Object.keys(counts).length > 0) {
-            dispatch(setPostLikeCounts(counts));
+            Object.entries(counts).forEach(([postId, count]) => {
+              dispatch(setPostLikeCount({ postId, count }));
+            });
           }
         }
       } catch (error) {
         console.error('Batch like status fetch error:', error);
-        // Re-add to queue for retry (optional)
-        // pendingPostIds.current.push(...batch);
+        // Mark all posts in batch as checked to avoid infinite retry loops
+        // They'll be re-checked on refresh anyway
+        batch.forEach(postId => {
+          checkedPostIds.current.add(postId);
+        });
       }
     }, 400); // Check every 400ms
 
@@ -90,23 +133,28 @@ export const useLikesManager = () => {
   }, [dispatch, likedPosts]);
 
   /**
-   * Optimistic toggle like
+   * Optimistic toggle like - Simple and straightforward (KISS)
    */
   const toggleLike = useCallback(async (postId: string) => {
-    const isLiked = likedPosts.includes(postId);
+    // Mark as pending to prevent batch check overwrites
+    pendingTogglePostIds.current.add(postId);
+    
+    // Get current state from Redux selectors (fresh on each call)
+    const currentIsLiked = likedPosts.includes(postId);
     const currentCount = postLikeCounts[postId] || 0;
 
-    // Optimistic update - update immediately
-    const newLikedPosts = isLiked
-      ? likedPosts.filter(id => id !== postId)
-      : [...likedPosts, postId];
-    
-    const newCount = isLiked 
-      ? Math.max(0, currentCount - 1)
-      : currentCount + 1;
+    const newIsLiked = !currentIsLiked;
+    const newCount = newIsLiked 
+      ? currentCount + 1
+      : Math.max(0, currentCount - 1);
 
-    dispatch(setLikedPosts(newLikedPosts));
-    dispatch(setPostLikeCounts({ ...postLikeCounts, [postId]: newCount }));
+    // Optimistic update - update immediately using Redux actions
+    if (newIsLiked) {
+      dispatch(addLikedPost(postId));
+    } else {
+      dispatch(removeLikedPost(postId));
+    }
+    dispatch(setPostLikeCount({ postId, count: newCount }));
 
     // Background API call
     try {
@@ -117,23 +165,36 @@ export const useLikesManager = () => {
         const serverIsLiked = response.data.isLiked;
         const serverLikeCount = response.data.likeCount;
 
-        // Update Redux with server response
-        const finalLikedPosts = serverIsLiked
-          ? [...new Set([...likedPosts, postId])]
-          : likedPosts.filter(id => id !== postId);
-        
-        dispatch(setLikedPosts(finalLikedPosts));
-        dispatch(setPostLikeCounts({ ...postLikeCounts, [postId]: serverLikeCount }));
+        // Sync with server response
+        if (serverIsLiked && !likedPosts.includes(postId)) {
+          dispatch(addLikedPost(postId));
+        } else if (!serverIsLiked && likedPosts.includes(postId)) {
+          dispatch(removeLikedPost(postId));
+        }
+        dispatch(setPostLikeCount({ postId, count: serverLikeCount }));
       } else {
         // Revert on error
-        dispatch(setLikedPosts(likedPosts));
-        dispatch(setPostLikeCounts({ ...postLikeCounts, [postId]: currentCount }));
+        if (currentIsLiked) {
+          dispatch(addLikedPost(postId));
+        } else {
+          dispatch(removeLikedPost(postId));
+        }
+        dispatch(setPostLikeCount({ postId, count: currentCount }));
       }
     } catch (error) {
       console.error('Toggle like error:', error);
       // Revert on error
-      dispatch(setLikedPosts(likedPosts));
-      dispatch(setPostLikeCounts({ ...postLikeCounts, [postId]: currentCount }));
+      if (currentIsLiked) {
+        dispatch(addLikedPost(postId));
+      } else {
+        dispatch(removeLikedPost(postId));
+      }
+      dispatch(setPostLikeCount({ postId, count: currentCount }));
+    } finally {
+      // Remove from pending after a delay to allow server response to process
+      setTimeout(() => {
+        pendingTogglePostIds.current.delete(postId);
+      }, 2000);
     }
   }, [likedPosts, postLikeCounts, dispatch]);
 

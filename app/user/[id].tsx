@@ -80,9 +80,11 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   const [postModalVisible, setPostModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { sendFollowAction, isConnected } = useRealtime();
-  const colorScheme = useColorScheme() || 'light';
-  const C = COLORS[colorScheme];
+  const C = COLORS.dark; // Force dark mode
   const navigation = useNavigation();
+  
+  // Error and loading states
+  const [error, setError] = useState<{ type: 'network' | 'server' | 'unknown'; message: string } | null>(null);
 
   // Fetch profile info
   useEffect(() => {
@@ -90,15 +92,41 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       if (!id) return;
       setLoadingProfile(true);
       setProfileError(null);
+      setError(null);
       try {
         const response = await userApi.getUserById(id as string);
         if (response.status === 'success' && response.data) {
-          setProfile(response.data);
+          const userData = response.data;
+          // Normalize user data structure
+          setProfile({
+            ...userData,
+            name: userData.name || userData.username || 'User',
+            username: userData.username || '',
+            profile_picture: userData.profile_picture || '',
+            bio: userData.bio || '',
+            email: (userData as any).email || '',
+            phone1: (userData as any).phone1 || '',
+            phone2: (userData as any).phone2 || '',
+            followers_count: userData.followers_count || (userData as any).follower_count || 0,
+            following_count: userData.following_count || (userData as any).subscribers || 0,
+            posts_count: userData.posts_count || 0,
+            id: userData.id || id as string,
+          });
         } else {
-          setProfileError(response.message || 'Failed to fetch user profile');
+          const errorMsg = response.message || 'Failed to fetch user profile';
+          setProfileError(errorMsg);
+          setError({ type: 'server', message: errorMsg });
         }
       } catch (err: any) {
-        setProfileError(err.message || 'Failed to fetch user profile');
+        const isNetworkError = err?.message?.includes('Network') || err?.code === 'NETWORK_ERROR' || !err?.response;
+        const errorMsg = err?.message || 'Failed to fetch user profile';
+        setProfileError(errorMsg);
+        setError({
+          type: isNetworkError ? 'network' : 'server',
+          message: isNetworkError 
+            ? 'No internet connection. Please check your network and try again.' 
+            : errorMsg
+        });
       } finally {
         setLoadingProfile(false);
       }
@@ -188,13 +216,19 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     try {
       const response = await userApi.getUserApprovedPosts(id as string);
       if (response.status === 'success' && response.data) {
-        setApprovedPosts(response.data);
-        console.log('Approved posts:', response.data); // Debug output
+        // Handle both array and object with posts property
+        const posts = Array.isArray(response.data) 
+          ? response.data 
+          : (response.data as any)?.posts || [];
+        setApprovedPosts(posts);
       } else {
         setPostsError(response.message || 'Failed to fetch posts');
       }
     } catch (err: any) {
-      setPostsError(err.message || 'Failed to fetch posts');
+      const isNetworkError = err?.message?.includes('Network') || err?.code === 'NETWORK_ERROR';
+      setPostsError(isNetworkError 
+        ? 'Network error. Please check your connection.' 
+        : err?.message || 'Failed to fetch posts');
     } finally {
       setLoadingPosts(false);
     }
@@ -359,36 +393,55 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
 
   if (loadingProfile) {
     return (
-      <View style={[styles.container, { backgroundColor: C.background }]}>
+      <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={C.primary} />
-          <Text style={[styles.loadingText, { color: C.textSecondary }]}>Loading profile...</Text>
+          <DotsSpinner size={10} color={C.primary} />
+          <Text style={[styles.loadingText, { color: C.text }]}>Loading profile...</Text>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (profileError || !profile) {
     return (
-      <View style={[styles.container, { backgroundColor: C.background }]}>
+      <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
         <View style={styles.loadingContainer}>
           <MaterialIcons name="error-outline" size={48} color={C.textSecondary} />
-          <Text style={[styles.errorText, { color: C.textSecondary }]}>
+          <Text style={[styles.errorText, { color: C.text }]}>
             {profileError || 'Failed to load profile'}
           </Text>
+          {error && error.type === 'network' && (
+            <Text style={[styles.errorSubtext, { color: C.textSecondary }]}>
+              Please check your internet connection
+            </Text>
+          )}
           <TouchableOpacity 
             style={[styles.retryButton, { backgroundColor: C.primary }]} 
             onPress={onRefresh}
           >
-            <Text style={[styles.retryButtonText, { color: C.buttonText }]}>Reload Profile</Text>
+            <Text style={[styles.retryButtonText, { color: C.buttonText }]}>Retry</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: C.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: C.background, borderBottomColor: C.border }]}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <MaterialIcons name="arrow-back" size={24} color={C.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: C.text }]}>
+          {profile?.name || profile?.username || 'Profile'}
+        </Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
       <ScrollView 
         style={styles.scrollView}
         refreshControl={
@@ -405,46 +458,55 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           <View style={styles.profileHeader}>
             <View style={styles.avatarShadowWrapper}>
               <Image
-                source={profile?.profile_picture ? { uri: profile.profile_picture } : require('../../assets/images/icon.png')}
+                source={profile?.profile_picture ? { uri: profile.profile_picture } : { uri: 'https://via.placeholder.com/80' }}
                 style={styles.avatarLarge}
                 resizeMode="cover"
               />
             </View>
             <View style={styles.profileInfo}>
-              <Text style={[styles.profileName, { color: C.text }]}>{profile?.name || profile?.username || 'User'}</Text>
-              <Text style={[styles.profileUsername, { color: C.textSecondary }]}>@{profile?.username}</Text>
-              {profile?.bio && <Text style={[styles.profileBio, { color: C.text }]}>{profile.bio}</Text>}
+              <Text style={[styles.profileName, { color: C.text }]}>
+                {profile?.name || profile?.username || 'User'}
+              </Text>
+              <Text style={[styles.profileUsername, { color: C.textSecondary }]}>
+                @{profile?.username || 'unknown'}
+              </Text>
+              {profile?.bio && (
+                <Text style={[styles.profileBio, { color: C.text }]} numberOfLines={3}>
+                  {profile.bio}
+                </Text>
+              )}
             </View>
           </View>
 
-          {/* Contact Info */}
-          <View style={styles.contactInfo}>
-            {profile?.email && (
-              <View style={styles.contactItem}>
-                <MaterialIcons name="email" size={16} color={C.textSecondary} />
-                <Text style={[styles.contactText, { color: C.text }]}>{profile.email}</Text>
-              </View>
-            )}
-            {(profile as any)?.phone1 && (
-              <View style={styles.contactItem}>
-                <MaterialIcons name="phone" size={16} color={C.textSecondary} />
-                <Text style={[styles.contactText, { color: C.text }]}>{(profile as any).phone1}</Text>
-              </View>
-            )}
-            {(profile as any)?.phone2 && (
-              <View style={styles.contactItem}>
-                <MaterialIcons name="phone" size={16} color={C.textSecondary} />
-                <Text style={[styles.contactText, { color: C.text }]}>{(profile as any).phone2}</Text>
-              </View>
-            )}
-          </View>
+          {/* Contact Info - Only show if available */}
+          {((profile as any)?.email || (profile as any)?.phone1 || (profile as any)?.phone2) && (
+            <View style={[styles.contactInfo, { borderTopColor: C.border, borderTopWidth: 1, paddingTop: 16, marginTop: 16 }]}>
+              {(profile as any)?.email && (
+                <View style={styles.contactItem}>
+                  <MaterialIcons name="email" size={18} color={C.primary} />
+                  <Text style={[styles.contactText, { color: C.text }]}>{(profile as any).email}</Text>
+                </View>
+              )}
+              {(profile as any)?.phone1 && (
+                <View style={styles.contactItem}>
+                  <MaterialIcons name="phone" size={18} color={C.primary} />
+                  <Text style={[styles.contactText, { color: C.text }]}>{(profile as any).phone1}</Text>
+                </View>
+              )}
+              {(profile as any)?.phone2 && (
+                <View style={styles.contactItem}>
+                  <MaterialIcons name="phone" size={18} color={C.primary} />
+                  <Text style={[styles.contactText, { color: C.text }]}>{(profile as any).phone2}</Text>
+                </View>
+              )}
+            </View>
+          )}
 
           {/* Stats */}
-          <View style={styles.statsRow}>
+          <View style={[styles.statsRow, { borderTopColor: C.border, borderTopWidth: 1, paddingTop: 20, marginTop: 20 }]}>
             <TouchableOpacity 
-              style={styles.statItem}
+              style={[styles.statItem, { backgroundColor: C.background }]}
               onPress={() => {
-                console.log('Navigating to followers page with posts type');
                 router.push({
                   pathname: '/followers/[id]' as any,
                   params: { id: id as string, type: 'posts' }
@@ -455,9 +517,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
               <Text style={[styles.statLabel, { color: C.textSecondary }]}>Posts</Text>
             </TouchableOpacity>
             <TouchableOpacity 
-              style={styles.statItem}
+              style={[styles.statItem, { backgroundColor: C.background }]}
               onPress={() => {
-                console.log('Navigating to followers page with followers type');
                 router.push({
                   pathname: '/followers/[id]' as any,
                   params: { id: id as string, type: 'followers' }
@@ -466,16 +527,10 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             >
               <Text style={[styles.statValue, { color: C.text }]}>{profile?.followers_count ?? 0}</Text>
               <Text style={[styles.statLabel, { color: C.textSecondary }]}>Followers</Text>
-              {isConnected && (
-                <View style={styles.realtimeIndicator}>
-                  <Text style={[styles.realtimeText, { color: C.primary }]}>●</Text>
-                </View>
-              )}
             </TouchableOpacity>
             <TouchableOpacity 
-              style={styles.statItem}
+              style={[styles.statItem, { backgroundColor: C.background }]}
               onPress={() => {
-                console.log('Navigating to followers page with following type');
                 router.push({
                   pathname: '/followers/[id]' as any,
                   params: { id: id as string, type: 'following' }
@@ -494,29 +549,46 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
               disabled={followLoading}
               style={[
                 styles.followButton,
-                { backgroundColor: isFollowing ? 'transparent' : C.primary, borderColor: C.primary }
+                { 
+                  backgroundColor: isFollowing ? 'transparent' : C.primary, 
+                  borderColor: C.primary,
+                  borderWidth: 1,
+                  marginTop: 20
+                }
               ]}
             >
-              <Text style={[
-                styles.followButtonText,
-                { color: isFollowing ? C.primary : C.buttonText }
-              ]}>
-                {followLoading ? '...' : (isFollowing ? 'Following' : 'Follow')}
-              </Text>
+              {followLoading ? (
+                <DotsSpinner size={6} color={isFollowing ? C.primary : C.buttonText} />
+              ) : (
+                <Text style={[
+                  styles.followButtonText,
+                  { color: isFollowing ? C.primary : C.buttonText }
+                ]}>
+                  {isFollowing ? 'Following' : 'Follow'}
+                </Text>
+              )}
             </TouchableOpacity>
           )}
         </View>
 
         {/* Posts Section */}
-        <View style={styles.postsSection}>
-          <Text style={[styles.sectionTitle, { color: C.text }]}>Posts</Text>
+        <View style={[styles.postsSection, { backgroundColor: C.background }]}>
+          <Text style={[styles.sectionTitle, { color: C.text }]}>Posts ({approvedPosts.length})</Text>
           {loadingPosts ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color={C.primary} />
+              <DotsSpinner size={8} color={C.primary} />
+              <Text style={[styles.loadingText, { color: C.textSecondary, marginTop: 12 }]}>Loading posts...</Text>
             </View>
           ) : postsError ? (
             <View style={styles.loadingContainer}>
-              <Text style={[styles.errorText, { color: 'red' }]}>{postsError}</Text>
+              <MaterialIcons name="error-outline" size={32} color={C.textSecondary} />
+              <Text style={[styles.errorText, { color: C.textSecondary }]}>{postsError}</Text>
+              <TouchableOpacity 
+                style={[styles.retryButton, { backgroundColor: C.primary, marginTop: 12 }]} 
+                onPress={fetchApprovedPosts}
+              >
+                <Text style={[styles.retryButtonText, { color: C.buttonText }]}>Retry</Text>
+              </TouchableOpacity>
             </View>
           ) : approvedPosts.length === 0 ? (
             <View style={styles.emptyContainer}>
@@ -534,21 +606,15 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                     onPress={() => handlePostPress(item)}
                     style={[styles.postCard, { backgroundColor: C.card }]}
                   >
-                    {/* Media Preview */}
+                    {/* Media Preview - Use thumbnail for videos */}
                     {mediaUrl ? (
                       isVideo ? (
                         <View style={styles.videoThumbnail}>
-                          <Video
-                            source={{ uri: mediaUrl }}
-                            style={styles.postImage}
-                            resizeMode={ResizeMode.COVER}
-                            shouldPlay={true}
-                            isLooping={true}
-                            isMuted={true}
-                            useNativeControls={false}
-                            shouldCorrectPitch={true}
-                            volume={0.0}
-                            posterStyle={{ resizeMode: 'cover' }}
+                          {/* Use thumbnail image instead of Video component for grid */}
+                          <Image 
+                            source={{ uri: item.image || (item as any).thumbnail || mediaUrl }} 
+                            style={styles.postImage} 
+                            resizeMode="cover" 
                           />
                           <View style={styles.playIconOverlay}>
                             <MaterialIcons name="play-circle-outline" size={48} color="#fff" />
@@ -558,11 +624,9 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                         <Image source={{ uri: mediaUrl }} style={styles.postImage} resizeMode="cover" />
                       )
                     ) : (
-                      <Image
-                        source={{ uri: 'https://via.placeholder.com/150' }}
-                        style={styles.postImage}
-                        resizeMode="cover"
-                      />
+                      <View style={[styles.postImage, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center' }]}>
+                        <MaterialIcons name="broken-image" size={32} color={C.textSecondary} />
+                      </View>
                     )}
                     {/* Caption and Category */}
                     <View style={styles.postFooter}>
@@ -604,6 +668,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           )}
         </View>
       </ScrollView>
+      
       {/* Post Modal Overlay */}
       <Modal visible={postModalVisible} animationType="slide" transparent onRequestClose={handleClosePostModal}>
         <View style={[styles.overlayBackdrop, { backgroundColor: 'rgba(0,0,0,0.95)' }]}> 
@@ -656,7 +721,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -744,11 +809,11 @@ const styles = StyleSheet.create({
   },
   statItem: {
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0,0,0,0.05)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
     marginHorizontal: 4,
+    minWidth: 80,
   },
   statValue: {
     fontSize: 18,
@@ -778,7 +843,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   postCard: {
-    backgroundColor: '#1a1a1a',
     borderRadius: 12,
     marginBottom: 16,
     shadowColor: '#000',
@@ -788,7 +852,7 @@ const styles = StyleSheet.create({
     elevation: 3,
     width: '48%',
     borderWidth: 1,
-    borderColor: '#333',
+    overflow: 'hidden',
   },
   postHeader: {
     flexDirection: 'row',
@@ -865,6 +929,12 @@ const styles = StyleSheet.create({
   errorText: {
     textAlign: 'center',
     fontSize: 16,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  errorSubtext: {
+    textAlign: 'center',
+    fontSize: 14,
     marginBottom: 16,
   },
   retryButton: {

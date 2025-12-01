@@ -117,6 +117,35 @@ interface PostItemProps {
   availableHeight: number;
 }
 
+// Expandable caption component
+const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: number }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!text) return null;
+
+  // Estimate if text needs truncation (rough: ~50 chars per line)
+  const estimatedLines = text.length / 50;
+  const shouldTruncate = estimatedLines > maxLines || text.split('\n').length > maxLines;
+
+  return (
+    <View>
+      <Text 
+        style={styles.caption} 
+        numberOfLines={expanded ? undefined : maxLines}
+      >
+        {text}
+      </Text>
+      {shouldTruncate && (
+        <TouchableOpacity onPress={() => setExpanded(!expanded)} activeOpacity={0.7}>
+          <Text style={styles.showMoreText}>
+            {expanded ? 'Show less' : 'Show more'}
+          </Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+};
+
 const PostItem: React.FC<PostItemProps> = ({ 
   item, 
   index, 
@@ -151,9 +180,8 @@ const PostItem: React.FC<PostItemProps> = ({
     initialIsLiked: isPostLiked || isLiked,
   });
   
-  // Use the realtime hook's isLiked state as the source of truth
-  // The hook handles optimistic updates and server sync internally
-  // No need to sync from parent prop - the hook manages its own state
+  // Use Redux as single source of truth for like state
+  // The likesManager handles optimistic updates and API calls
   const videoRef = useRef<Video>(null);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -163,6 +191,8 @@ const PostItem: React.FC<PostItemProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [useNativeControls, setUseNativeControls] = useState(false);
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0); // 0-1
+  const [videoDuration, setVideoDuration] = useState(0); // in milliseconds
   const insets = useSafeAreaInsets();
   
   // Like animation
@@ -249,28 +279,11 @@ const PostItem: React.FC<PostItemProps> = ({
     if (isLiking) return;
     setIsLiking(true);
     
-    // Get current like state
-    const currentIsLiked = realtimeIsLiked;
+    // Get current like state from Redux (single source of truth)
+    const currentIsLiked = isPostLiked;
     const newIsLiked = !currentIsLiked;
     
-    // Optimistic update - update Redux immediately
-    if (newIsLiked) {
-      dispatch(addLikedPost(item.id));
-    } else {
-      dispatch(removeLikedPost(item.id));
-    }
-    
-    // Update like count in Redux
-    const newLikeCount = newIsLiked ? likes + 1 : Math.max(0, likes - 1);
-    dispatch(setPostLikeCount({ postId: item.id, count: newLikeCount }));
-    
-    // Update realtime hook
-    updateLikesLocally(newLikeCount, newIsLiked);
-    
-    // Also update parent cache immediately for UI consistency
-    onLike(item.id);
-    
-    // Animate like button
+    // Animate like button immediately
     Animated.sequence([
       Animated.timing(likeScale, {
         toValue: 1.3,
@@ -302,64 +315,10 @@ const PostItem: React.FC<PostItemProps> = ({
     // Send realtime update
     sendLikeAction(item.id, newIsLiked);
     
-    // Call API to toggle like directly
-    try {
-      const response = await likesApi.toggle(item.id);
-      
-      if (response.status === 'success' && response.data) {
-        // Update with server response
-        const serverIsLiked = response.data.isLiked;
-        const serverLikeCount = response.data.likeCount;
-        
-        // Update Redux with server response
-        if (serverIsLiked) {
-          dispatch(addLikedPost(item.id));
-        } else {
-          dispatch(removeLikedPost(item.id));
-        }
-        dispatch(setPostLikeCount({ postId: item.id, count: serverLikeCount }));
-        
-        // Update local state with server response
-        updateLikesLocally(serverLikeCount, serverIsLiked);
-      } else {
-        // Revert on error
-        updateLikesLocally(likes, currentIsLiked);
-        // Check if it's an auth error
-        if (response.message?.includes('User not found') || response.message?.includes('log in')) {
-          Alert.alert(
-            'Session Expired',
-            'Your session has expired. Please log in again.',
-            [
-              {
-                text: 'OK',
-                onPress: () => router.push('/auth/login')
-              }
-            ]
-          );
-        }
-      }
-    } catch (error: any) {
-      // Revert on error
-      updateLikesLocally(likes, currentIsLiked);
-      
-      // Handle authentication errors
-      if (error?.status === 404 || error?.status === 401 || 
-          error?.data?.message?.includes('User not found') ||
-          error?.data?.message?.includes('log in')) {
-        Alert.alert(
-          'Session Expired',
-          'Your session has expired. Please log in again to continue.',
-          [
-            {
-              text: 'OK',
-              onPress: () => router.push('/auth/login')
-            }
-          ]
-        );
-      }
-    } finally {
-      setIsLiking(false);
-    }
+    // Use likesManager for all like operations (handles optimistic updates and API)
+    await onLike(item.id);
+    
+    setIsLiking(false);
   };
 
   const handleFollow = () => {
@@ -464,10 +423,19 @@ const PostItem: React.FC<PostItemProps> = ({
                   }
                 }}
                 useNativeControls={useNativeControls}
+                progressUpdateIntervalMillis={100}
                 onPlaybackStatusUpdate={(status: any) => {
                   if (status.isLoaded && !useNativeControls) {
                     if (status.isPlaying !== isPlaying) {
                       setIsPlaying(status.isPlaying);
+                    }
+                    // Update progress
+                    if (status.durationMillis && status.positionMillis !== undefined) {
+                      const progress = status.durationMillis > 0 
+                        ? status.positionMillis / status.durationMillis 
+                        : 0;
+                      setVideoProgress(progress);
+                      setVideoDuration(status.durationMillis);
                     }
                   }
                 }}
@@ -505,6 +473,20 @@ const PostItem: React.FC<PostItemProps> = ({
           </TouchableOpacity>
         )}
 
+        {/* Video Progress Bar - at bottom edge */}
+        {isVideo && !useNativeControls && videoDuration > 0 && (
+          <View style={styles.progressBarContainer}>
+            <View style={styles.progressBarTrack}>
+              <View 
+                style={[
+                  styles.progressBarFill,
+                  { width: `${videoProgress * 100}%` }
+                ]} 
+              />
+            </View>
+          </View>
+        )}
+
         {/* Right Side Actions - TikTok style, positioned lower */}
         <View style={[styles.rightActions, { bottom: -20 + insets.bottom }]}>
           {/* User Avatar */}
@@ -533,11 +515,11 @@ const PostItem: React.FC<PostItemProps> = ({
               <Feather 
                 name="heart" 
                 size={24} 
-                color={realtimeIsLiked ? "#ff2d55" : "#fff"} 
-                fill={realtimeIsLiked ? "#ff2d55" : "none"}
+                color={isPostLiked ? "#ff2d55" : "#fff"} 
+                fill={isPostLiked ? "#ff2d55" : "none"}
               />
             </Animated.View>
-            <Text style={styles.actionCount}>{formatNumber(likes)}</Text>
+            <Text style={styles.actionCount}>{formatNumber(cachedLikeCount !== undefined ? cachedLikeCount : (item.likes || 0))}</Text>
           </TouchableOpacity>
           
           {/* Like Animation Overlay */}
@@ -581,12 +563,12 @@ const PostItem: React.FC<PostItemProps> = ({
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
             </TouchableOpacity>
             
-            <Text style={styles.caption} numberOfLines={3}>
-              {item.title}
-            </Text>
-            <Text style={styles.caption} numberOfLines={3}>
-              {item.description}
-            </Text>
+            {item.title && (
+              <ExpandableCaption text={item.title} maxLines={2} />
+            )}
+            {item.description && (
+              <ExpandableCaption text={item.description} maxLines={2} />
+            )}
           </View>
 
           {/* Category Badge */}
@@ -625,6 +607,9 @@ export default function FeedScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState('featured');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
@@ -656,10 +641,23 @@ export default function FeedScreen() {
   const bottomNavHeight = 60 + insets.bottom; // Bottom navbar height
   const availableHeight = screenHeight - headerHeight - bottomNavHeight;
 
-  const loadPosts = async (tab = 'featured', refresh = false) => {
+  const INITIAL_LIMIT = 10; // Reduced initial load for faster response
+  const LOAD_MORE_LIMIT = 10; // Load 10 more posts at a time
+
+  const loadPosts = async (tab = 'featured', refresh = false, page = 1) => {
     try {
-      setLoading(refresh ? false : true);
+      if (refresh) {
+        setRefreshing(true);
+        setCurrentPage(1);
+        setHasMore(true);
+      } else if (page === 1) {
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
+      
       let response;
+      const limit = page === 1 ? INITIAL_LIMIT : LOAD_MORE_LIMIT;
       
       // Add timestamp to force fresh data on refresh
       const timestamp = refresh ? `&t=${Date.now()}` : '';
@@ -667,25 +665,30 @@ export default function FeedScreen() {
       // Load different content based on tab
       switch (tab) {
         case 'featured':
-          response = await postsApi.getFeatured(1, 20, timestamp);
+          response = await postsApi.getFeatured(page, limit, timestamp);
           break;
         case 'foryou':
-          response = await postsApi.getAll(1, 20, timestamp);
+          response = await postsApi.getAll(page, limit, timestamp);
           break;
         case 'following':
           if (user) {
-            response = await postsApi.getFollowing(1, 20, timestamp);
+            response = await postsApi.getFollowing(page, limit, timestamp);
           } else {
             response = { status: 'success', data: { posts: [], pagination: {}, filters: {} } };
           }
           break;
         default:
-          response = await postsApi.getAll(1, 20, timestamp);
+          response = await postsApi.getAll(page, limit, timestamp);
       }
       
       if (response.status === 'success') {
         const posts = response.data.posts || response.data;
         const postsArray = Array.isArray(posts) ? posts : [];
+        
+        // Check pagination info
+        const pagination = response.data.pagination || {};
+        const hasMoreData = pagination.hasNextPage !== false && postsArray.length === limit;
+        setHasMore(hasMoreData);
         
         // Update like counts in Redux
         const likeCountsMap: Record<string, number> = {};
@@ -704,20 +707,53 @@ export default function FeedScreen() {
           syncLikedPostsFromServer(postIds).catch(console.error);
         }
         
-        setPosts(postsArray);
+        if (page === 1 || refresh) {
+          setPosts(postsArray);
+        } else {
+          setPosts(prev => [...prev, ...postsArray]);
+        }
       } else {
+        if (page === 1) {
+          setPosts([]);
+        }
+        setHasMore(false);
+      }
+    } catch (error: any) {
+      console.error('Error loading posts:', error);
+      const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR' || !error?.response;
+      if (page === 1) {
         setPosts([]);
       }
-    } catch (error) {
-      console.error('Error loading posts:', error);
+      setHasMore(false);
+      // Show error only on initial load
+      if (page === 1 && !refreshing) {
+        Alert.alert(
+          'Error',
+          isNetworkError 
+            ? 'No internet connection. Please check your network and try again.'
+            : 'Failed to load posts. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setLoadingMore(false);
+    }
+  };
+
+  const loadMorePosts = () => {
+    if (!loadingMore && hasMore && !loading) {
+      const nextPage = currentPage + 1;
+      setCurrentPage(nextPage);
+      loadPosts(activeTab, false, nextPage);
     }
   };
 
   useEffect(() => {
-    loadPosts(activeTab);
+    setCurrentPage(1);
+    setHasMore(true);
+    loadPosts(activeTab, false, 1);
   }, [activeTab]);
 
   // Sync liked posts when user logs in or posts change
@@ -736,7 +772,9 @@ export default function FeedScreen() {
   useEffect(() => {
     const handleAppStateChange = (nextAppState: string) => {
       if (nextAppState === 'active') {
-        loadPosts(activeTab, true);
+        setCurrentPage(1);
+        setHasMore(true);
+        loadPosts(activeTab, true, 1);
       }
     };
 
@@ -767,8 +805,9 @@ export default function FeedScreen() {
   );
 
   const onRefresh = () => {
-    setRefreshing(true);
-    loadPosts(activeTab, true);
+    setCurrentPage(1);
+    setHasMore(true);
+    loadPosts(activeTab, true, 1);
   };
 
   const handleLike = async (postId: string) => {
@@ -965,6 +1004,16 @@ export default function FeedScreen() {
               onRefresh={onRefresh}
               tintColor="#60a5fa"
             />
+          }
+          onEndReached={loadMorePosts}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.loadMoreContainer}>
+                <ActivityIndicator size="small" color="#60a5fa" />
+                <Text style={styles.loadMoreText}>Loading more posts...</Text>
+              </View>
+            ) : null
           }
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
@@ -1174,6 +1223,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     lineHeight: 20,
+    marginTop: 4,
+  },
+  showMoreText: {
+    color: '#60a5fa',
+    fontSize: 13,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  loadMoreContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadMoreText: {
+    color: '#999',
+    fontSize: 14,
+    marginTop: 8,
     marginBottom: 12,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 1, height: 1 },
@@ -1232,5 +1298,22 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 14,
     marginTop: 12,
+  },
+  progressBarContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    zIndex: 10,
+  },
+  progressBarTrack: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#60a5fa',
   },
 });
