@@ -13,6 +13,7 @@ import {
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { authApi } from '@/lib/api';
 
 const THEME = {
@@ -56,6 +57,7 @@ export default function ForgotPasswordScreen() {
   const [otpCooldownSeconds, setOtpCooldownSeconds] = useState(0);
   const otpInputRefs = useRef<any[]>([]);
   const C = THEME;
+  const insets = useSafeAreaInsets();
 
   const isValidEmail = (value: string) => {
     if (!value.trim()) {
@@ -327,7 +329,7 @@ export default function ForgotPasswordScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* Back button */}
-        <View style={styles.navRow}>
+        <View style={[styles.navRow, { marginTop: insets.top + 4 }]}>
           <TouchableOpacity
             onPress={() => {
               if (router.canGoBack()) {

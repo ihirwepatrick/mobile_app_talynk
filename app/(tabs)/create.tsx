@@ -175,7 +175,7 @@ export default function CreatePostScreen() {
           {
             text: 'Cancel',
             style: 'cancel',
-           onPress: () => router.replace('/(tabs)/index')
+           onPress: () => router.replace('/')
           },
           {
             text: 'Sign In',
@@ -213,7 +213,7 @@ export default function CreatePostScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, borderWidth: 1, minWidth: 120, alignItems: 'center' }, { borderColor: C.border }]}
-          onPress={() => router.replace('/(tabs)/index')}
+          onPress={() => router.replace('/')}
         >
           <Text style={[{ fontSize: 14, fontWeight: '500' }, { color: C.text }]}>Go Back</Text>
         </TouchableOpacity>

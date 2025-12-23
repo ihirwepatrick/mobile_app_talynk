@@ -16,6 +16,7 @@ import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const THEME = {
   background: '#000000',
@@ -46,6 +47,7 @@ export default function LoginScreen() {
   const [warning, setWarning] = useState<string | null>(null);
   const { login, loading } = useAuth();
   const C = THEME;
+  const insets = useSafeAreaInsets();
   
 
   const handleLogin = async () => {
@@ -59,7 +61,7 @@ export default function LoginScreen() {
     const success = await login(username, password);
     if (success) {
       setSuccess('Login successful!');
-      router.replace('/(tabs)/index');
+      router.replace('/');
     } else {
       setError('Invalid username/email or password');
     }
@@ -73,13 +75,13 @@ export default function LoginScreen() {
       <StatusBar style="light" backgroundColor="#000000" />
       <ScrollView style={[styles.scrollView, { backgroundColor: C.background }]} contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         {/* Back button */}
-        <View style={styles.navRow}>
+        <View style={[styles.navRow, { marginTop: insets.top + 4 }]}>
           <TouchableOpacity
             onPress={() => {
               if (router.canGoBack()) {
                 router.back();
               } else {
-                router.replace('/(tabs)/index');
+                router.replace('/');
               }
             }}
             style={[styles.backButton, { borderColor: C.border }]}

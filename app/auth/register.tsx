@@ -16,6 +16,7 @@ import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Modal, FlatList } from 'react-native';
 import { authApi, countriesApi } from '@/lib/api';
 import { Country } from '@/types';
@@ -70,6 +71,7 @@ export default function RegisterScreen() {
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const { loading, error, clearError } = useAuth();
   const C = THEME;
+  const insets = useSafeAreaInsets();
   // Steps:
   // 1 = Email
   // 2 = Verify (OTP)
@@ -467,7 +469,7 @@ export default function RegisterScreen() {
       <StatusBar style="light" backgroundColor="#000000" />
       <ScrollView style={{ backgroundColor: C.background }} contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         {/* Back button */}
-        <View style={styles.navRow}>
+        <View style={[styles.navRow, { marginTop: insets.top + 4 }]}>
           <TouchableOpacity
             onPress={() => {
               if (router.canGoBack()) {
