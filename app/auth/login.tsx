@@ -59,7 +59,7 @@ export default function LoginScreen() {
     const success = await login(username, password);
     if (success) {
       setSuccess('Login successful!');
-      router.replace('/(tabs)');
+      router.replace('/(tabs)/index');
     } else {
       setError('Invalid username/email or password');
     }
@@ -79,7 +79,7 @@ export default function LoginScreen() {
               if (router.canGoBack()) {
                 router.back();
               } else {
-                router.replace('/(tabs)');
+                router.replace('/(tabs)/index');
               }
             }}
             style={[styles.backButton, { borderColor: C.border }]}

@@ -6,6 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
+import { LogBox } from 'react-native';
 
 import { AuthProvider } from '@/lib/auth-context';
 import { CacheProvider } from '@/lib/cache-context';
@@ -59,6 +60,11 @@ function RootLayoutNav() {
   // Initialize Redux store from AsyncStorage
   useEffect(() => {
     initializeStore();
+  }, []);
+
+  // Ignore dev-only keep-awake warning coming from Expo tooling
+  useEffect(() => {
+    LogBox.ignoreLogs(['Unable to activate keep awake']);
   }, []);
 
   return (
