@@ -137,7 +137,16 @@ export default function RegisterScreen() {
     return () => clearInterval(timer);
   }, [otpCooldownSeconds]);
 
-  const isFormBusy = loading || registerLoading;
+  // Auto-verify OTP when all digits are entered
+  useEffect(() => {
+    const code = otpDigits.join('');
+    if (code.length === OTP_LENGTH && !otpVerifyLoading) {
+      // Fire and forget; button still available as fallback
+      verifyRegistrationCode(code);
+    }
+  }, [otpDigits]);
+
+  const isFormBusy = loading || registerLoading || otpRequestLoading || otpVerifyLoading;
 
   const isValidEmail = (value: string) => {
     if (!value.trim()) {
@@ -225,7 +234,7 @@ export default function RegisterScreen() {
     }
   };
 
-  const handleVerifyOtp = async () => {
+  const verifyRegistrationCode = async (code: string) => {
     clearError();
     setSuccess(null);
     setWarning(null);
@@ -235,9 +244,12 @@ export default function RegisterScreen() {
       return;
     }
 
-    const code = otpDigits.join('');
     if (!code || code.length !== OTP_LENGTH) {
       setWarning('Please enter the 6-digit verification code sent to your email');
+      return;
+    }
+
+    if (otpVerifyLoading) {
       return;
     }
 
@@ -249,7 +261,8 @@ export default function RegisterScreen() {
         setVerificationToken(token);
         setOtpVerified(true);
         setWarning(null);
-        setSuccess('Email verified successfully. You can now complete your registration.');
+        setSuccess('Email verified successfully. You can now set your password.');
+        setStep(3);
       } else {
         const code = (response.data as any)?.code;
         if (code === 'OTP_EXPIRED') {
@@ -271,6 +284,11 @@ export default function RegisterScreen() {
     } finally {
       setOtpVerifyLoading(false);
     }
+  };
+
+  const handleVerifyOtp = async () => {
+    const code = otpDigits.join('');
+    await verifyRegistrationCode(code);
   };
 
   const buildCompleteRegistrationPayload = () => {
@@ -448,6 +466,21 @@ export default function RegisterScreen() {
     >
       <StatusBar style="light" backgroundColor="#000000" />
       <ScrollView style={{ backgroundColor: C.background }} contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+        {/* Back button */}
+        <View style={styles.navRow}>
+          <TouchableOpacity
+            onPress={() => {
+              if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.replace('/auth/login');
+              }
+            }}
+            style={[styles.backButton, { borderColor: C.border }]}
+          >
+            <Ionicons name="chevron-back" size={26} color={C.text} />
+          </TouchableOpacity>
+        </View>
         {/* Stepper */}
         <View style={styles.stepper}>
           {[1, 2, 3, 4].map((s) => (
@@ -554,6 +587,10 @@ export default function RegisterScreen() {
                   />
                 ))}
               </View>
+
+              {otpVerifyLoading && (
+                <ActivityIndicator style={{ marginBottom: 12 }} color={C.primary} />
+              )}
 
               {otpCooldownSeconds > 0 ? (
                 <Text style={[styles.helperText, { color: C.textSecondary }]}>
@@ -794,8 +831,25 @@ export default function RegisterScreen() {
               </TouchableOpacity>
             )}
             {step < 4 && (
-              <TouchableOpacity style={[styles.navButtonPrimary, { backgroundColor: C.primary }]} onPress={handleNext} activeOpacity={0.8}>
-                <Text style={{ color: '#000', fontWeight: '600' }}>Next</Text>
+              <TouchableOpacity
+                style={[
+                  styles.navButtonPrimary,
+                  {
+                    backgroundColor:
+                      step === 1 && otpRequestLoading ? C.buttonDisabled : C.primary,
+                  },
+                ]}
+                onPress={handleNext}
+                disabled={step === 1 && otpRequestLoading}
+                activeOpacity={0.8}
+              >
+                {step === 1 && otpRequestLoading ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={{ color: '#000', fontWeight: '600' }}>
+                    {step === 1 ? 'Continue' : 'Next'}
+                  </Text>
+                )}
               </TouchableOpacity>
             )}
           </View>

@@ -80,6 +80,14 @@ export default function ForgotPasswordScreen() {
     return () => clearInterval(timer);
   }, [otpCooldownSeconds]);
 
+  // Auto-verify OTP when all digits are entered
+  useEffect(() => {
+    const code = otpDigits.join('');
+    if (code.length === OTP_LENGTH && !otpVerifyLoading) {
+      verifyResetCode(code);
+    }
+  }, [otpDigits]);
+
   const handleRequestOtp = async (): Promise<boolean> => {
     setError(null);
     setSuccess(null);
@@ -156,7 +164,7 @@ export default function ForgotPasswordScreen() {
     }
   };
 
-  const handleVerifyOtp = async () => {
+  const verifyResetCode = async (code: string) => {
     setError(null);
     setSuccess(null);
     setWarning(null);
@@ -166,9 +174,12 @@ export default function ForgotPasswordScreen() {
       return;
     }
 
-    const code = otpDigits.join('');
     if (!code || code.length !== OTP_LENGTH) {
       setWarning('Please enter the 6-digit verification code sent to your email');
+      return;
+    }
+
+    if (otpVerifyLoading) {
       return;
     }
 
@@ -181,6 +192,7 @@ export default function ForgotPasswordScreen() {
         setOtpVerified(true);
         setWarning(null);
         setSuccess('Code verified. You can now set a new password.');
+        setStep(3);
       } else {
         const codeValue = (response.data as any)?.code;
         if (codeValue === 'OTP_EXPIRED') {
@@ -202,6 +214,11 @@ export default function ForgotPasswordScreen() {
     } finally {
       setOtpVerifyLoading(false);
     }
+  };
+
+  const handleVerifyOtp = async () => {
+    const code = otpDigits.join('');
+    await verifyResetCode(code);
   };
 
   const handleResetPassword = async () => {
@@ -479,6 +496,10 @@ export default function ForgotPasswordScreen() {
                   />
                 ))}
               </View>
+
+              {otpVerifyLoading && (
+                <ActivityIndicator style={{ marginBottom: 12 }} color={C.primary} />
+              )}
 
               {otpCooldownSeconds > 0 ? (
                 <Text style={[styles.helperText, { color: C.textSecondary }]}>
