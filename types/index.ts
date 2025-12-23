@@ -6,6 +6,8 @@ export interface ApiResponse<T> {
   data: T;
 }
 
+// Auth / Registration specific types
+
 export interface LoginResponseData {
   accessToken: string;
   refreshToken: string;
@@ -19,6 +21,30 @@ export interface RegisterFormData {
   phone1: string;
   phone2?: string;
   country_id: number;
+}
+
+// New OTP-based registration flow types
+export interface RegisterOtpVerifyData {
+  verificationToken: string;
+  email: string;
+}
+
+export interface RegisterCompletePayload {
+  verificationToken: string;
+  username: string;
+  display_name: string;
+  password: string;
+  country_id: number;
+  date_of_birth: string;
+  email?: string;
+  phone1?: string;
+  phone2?: string;
+}
+
+// Password reset (OTP-based) types
+export interface PasswordResetVerifyData {
+  resetToken: string;
+  email: string;
 }
 
 export interface Country {

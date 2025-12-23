@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { Modal, FlatList } from 'react-native';
-import { countriesApi } from '@/lib/api';
+import { authApi, countriesApi } from '@/lib/api';
 import { Country } from '@/types';
 
 const THEME = {
@@ -52,6 +52,8 @@ const COUNTRIES = [
   { id: 9, name: 'United Kingdom', code: 'GB', dialCode: '+44' },
 ];
 
+const OTP_LENGTH = 6;
+
 export default function RegisterScreen() {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
@@ -66,16 +68,30 @@ export default function RegisterScreen() {
   const [success, setSuccess] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
-  const { register, loading, error, clearError } = useAuth();
+  const { loading, error, clearError } = useAuth();
   const C = THEME;
-  const [step, setStep] = useState(1); // 1=Account, 2=Phones, 3=Security
+  // Steps:
+  // 1 = Email
+  // 2 = Verify (OTP)
+  // 3 = Security (password)
+  // 4 = Profile / Onboarding (name, username, country, phones)
+  const [step, setStep] = useState(1);
   const [countryModalOpen, setCountryModalOpen] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]); // Default Rwanda
   const [countries, setCountries] = useState<Country[]>(COUNTRIES);
   const [loadingCountries, setLoadingCountries] = useState(false);
+  const [otpRequested, setOtpRequested] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [verificationToken, setVerificationToken] = useState<string | null>(null);
+  const [otpRequestLoading, setOtpRequestLoading] = useState(false);
+  const [otpVerifyLoading, setOtpVerifyLoading] = useState(false);
+  const [otpCooldownSeconds, setOtpCooldownSeconds] = useState(0);
+  const [registerLoading, setRegisterLoading] = useState(false);
+  const [otpDigits, setOtpDigits] = useState<string[]>(Array(OTP_LENGTH).fill(''));
+  const otpInputRefs = useRef<any[]>([]);
 
   // Fetch countries from backend on mount (with fallback to static list)
-  React.useEffect(() => {
+  useEffect(() => {
     const loadCountries = async () => {
       try {
         setLoadingCountries(true);
@@ -103,96 +119,267 @@ export default function RegisterScreen() {
     loadCountries();
   }, []);
 
+  // Reset verification when email changes
+  useEffect(() => {
+    setOtpVerified(false);
+    setVerificationToken(null);
+    setOtpDigits(Array(OTP_LENGTH).fill(''));
+  }, [email]);
+
+  // Simple countdown for OTP cooldown
+  useEffect(() => {
+    if (otpCooldownSeconds <= 0) {
+      return;
+    }
+    const timer = setInterval(() => {
+      setOtpCooldownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [otpCooldownSeconds]);
+
+  const isFormBusy = loading || registerLoading;
+
+  const isValidEmail = (value: string) => {
+    if (!value.trim()) {
+      return false;
+    }
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  };
+
+  const handleRequestOtp = async (): Promise<boolean> => {
+    clearError();
+    setSuccess(null);
+    setWarning(null);
+
+    if (!isValidEmail(email)) {
+      setWarning('Please enter a valid email address before requesting a code');
+      return false;
+    }
+
+    if (otpCooldownSeconds > 0 || otpRequestLoading) {
+      return false;
+    }
+
+    setOtpRequestLoading(true);
+    try {
+      const response = await authApi.requestRegistrationOtp(email.trim());
+      if (response.status === 'success') {
+        setOtpRequested(true);
+        setWarning(null);
+        setSuccess('We sent a verification code to your email. Enter it below to verify.');
+        const remaining = (response.data as any)?.remainingSeconds;
+        if (typeof remaining === 'number' && remaining > 0) {
+          setOtpCooldownSeconds(remaining);
+        } else {
+          setOtpCooldownSeconds(60);
+        }
+        return true;
+      } else {
+        setOtpRequested(false);
+        const remaining = (response.data as any)?.remainingSeconds;
+        if (typeof remaining === 'number' && remaining > 0) {
+          setOtpCooldownSeconds(remaining);
+        }
+        setWarning(response.message || 'Could not send verification code. Please try again.');
+        return false;
+      }
+    } catch (err: any) {
+      setWarning('Failed to send verification code. Please check your connection and try again.');
+      return false;
+    } finally {
+      setOtpRequestLoading(false);
+    }
+
+    return false;
+  };
+
+  const handleOtpChange = (index: number, value: string) => {
+    const cleaned = value.replace(/\D/g, '');
+    const char = cleaned.slice(-1);
+
+    setOtpDigits((prev) => {
+      const next = [...prev];
+      next[index] = char;
+      return next;
+    });
+
+    if (char && index < OTP_LENGTH - 1) {
+      const nextRef = otpInputRefs.current[index + 1];
+      if (nextRef && typeof nextRef.focus === 'function') {
+        nextRef.focus();
+      }
+    }
+  };
+
+  const handleOtpKeyPress = (index: number, key: string) => {
+    if (key === 'Backspace' && !otpDigits[index] && index > 0) {
+      const prevRef = otpInputRefs.current[index - 1];
+      if (prevRef && typeof prevRef.focus === 'function') {
+        prevRef.focus();
+      }
+      setOtpDigits((prev) => {
+        const next = [...prev];
+        next[index - 1] = '';
+        return next;
+      });
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    clearError();
+    setSuccess(null);
+    setWarning(null);
+
+    if (!isValidEmail(email)) {
+      setWarning('Please enter a valid email address before verifying your code');
+      return;
+    }
+
+    const code = otpDigits.join('');
+    if (!code || code.length !== OTP_LENGTH) {
+      setWarning('Please enter the 6-digit verification code sent to your email');
+      return;
+    }
+
+    setOtpVerifyLoading(true);
+    try {
+      const response = await authApi.verifyRegistrationOtp(email.trim(), code);
+      if (response.status === 'success' && (response.data as any)?.verificationToken) {
+        const token = (response.data as any).verificationToken as string;
+        setVerificationToken(token);
+        setOtpVerified(true);
+        setWarning(null);
+        setSuccess('Email verified successfully. You can now complete your registration.');
+      } else {
+        const code = (response.data as any)?.code;
+        if (code === 'OTP_EXPIRED') {
+          setWarning('Your code has expired. Please request a new one.');
+        } else if (code === 'INVALID_OTP') {
+          setWarning('The code you entered is incorrect. Please try again.');
+        } else if (code === 'OTP_ALREADY_USED') {
+          setWarning('This code was already used. Please request a new one.');
+        } else {
+          setWarning(response.message || 'Could not verify code. Please try again.');
+        }
+        setOtpVerified(false);
+        setVerificationToken(null);
+      }
+    } catch (err: any) {
+      setWarning('Failed to verify code. Please check your connection and try again.');
+      setOtpVerified(false);
+      setVerificationToken(null);
+    } finally {
+      setOtpVerifyLoading(false);
+    }
+  };
+
+  const buildCompleteRegistrationPayload = () => {
+    if (!verificationToken) {
+      return null;
+    }
+
+    const trimmedName = name.trim();
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim();
+
+    const digitsOnly = (v: string) => v.replace(/\D/g, '');
+
+    const payload = {
+      verificationToken,
+      username: trimmedUsername,
+      display_name: trimmedName || trimmedUsername,
+      password,
+      country_id: selectedCountry.id,
+      // For now, use a static date of birth placeholder; can be replaced with actual field later
+      date_of_birth: '1990-01-01',
+      email: trimmedEmail || undefined,
+      phone1: phone1.trim()
+        ? `${selectedCountry.dialCode}${digitsOnly(phone1)}`
+        : undefined,
+      phone2: phone2.trim()
+        ? `${selectedCountry.dialCode}${digitsOnly(phone2)}`
+        : undefined,
+    };
+
+    return payload;
+  };
+
   const handleRegister = async () => {
     clearError();
     setSuccess(null);
     setWarning(null);
-    
-    // Validate required fields
-    if (!name.trim()) {
-      // For validation errors, we'll show them in the UI but not store in auth context
-      setWarning('Please enter your full name');
+
+    const trimmedName = name.trim();
+    const trimmedUsername = username.trim();
+
+    if (!isValidEmail(email)) {
+      setWarning('Please enter a valid email address');
       return;
     }
-    if (!username.trim()) {
-      setWarning('Please enter a username');
+
+    if (!otpVerified || !verificationToken) {
+      setWarning('Please verify your email with the code we sent before signing up.');
       return;
     }
-    if (!phone1.trim()) {
-      setWarning('Please enter your primary phone number');
-      return;
-    }
+
     if (!password) {
       setWarning('Please enter a password');
       return;
     }
+
     if (!confirmPassword) {
       setWarning('Please confirm your password');
       return;
     }
-    if (!agreed) {
-      setWarning('You must agree to the Terms and Conditions');
-      return;
-    }
-    
-    // Validate username format (letters, numbers, underscores only)
-    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-      setWarning('Username can only contain letters, numbers, and underscores');
-      return;
-    }
-    
-    // Validate email format if provided
-    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setWarning('Please enter a valid email address');
-      return;
-    }
-    
-    // Validate phone format (basic international format)
-    const digitsOnly = (v: string) => v.replace(/\D/g, '');
-    if (digitsOnly(phone1).length < 7) {
-      setWarning('Please enter a valid primary phone number');
-      return;
-    }
-    
-    // Validate secondary phone if provided
-    if (phone2.trim() && digitsOnly(phone2).length < 7) {
-      setWarning('Please enter a valid secondary phone number');
-      return;
-    }
-    
-    // Validate password strength
+
     if (password.length < 8) {
       setWarning('Password must be at least 8 characters long');
       return;
     }
-    
+
     if (password !== confirmPassword) {
       setWarning('Passwords do not match');
       return;
     }
-    
-    // Prepare registration data
-    const registrationData = {
-      name: name.trim(),
-      username: username.trim(),
-      email: email.trim() || `${username.trim()}@talynk.com`, // Use generated email if not provided
-      password: password,
-      phone1: `${selectedCountry.dialCode}${digitsOnly(phone1)}`,
-      phone2: phone2.trim() ? `${selectedCountry.dialCode}${digitsOnly(phone2)}` : undefined,
-      country_id: selectedCountry.id,
-    };
-    
-          // Attempt registration
-      try {
-        const success = await register(registrationData);
-    if (success) {
-          setShowSuccessOverlay(true);
-    } else {
-          // The error message will be handled by the auth context
-          // We don't need to set a generic error here
-        }
-      } catch (err: any) {
-        setWarning(err.message || 'Registration failed. Please try again.');
+
+    if (!agreed) {
+      setWarning('You must agree to the Terms and Conditions');
+      return;
+    }
+
+    if (!trimmedName) {
+      setWarning('Please enter your full name');
+      return;
+    }
+
+    if (!trimmedUsername) {
+      setWarning('Please enter a username');
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
+      setWarning('Username can only contain letters, numbers, and underscores');
+      return;
+    }
+
+    const payload = buildCompleteRegistrationPayload();
+    if (!payload) {
+      setWarning('Something went wrong while preparing your registration. Please try again.');
+      return;
+    }
+
+    setRegisterLoading(true);
+    try {
+      const response = await authApi.completeRegistration(payload as any);
+      if (response.status === 'success') {
+        setShowSuccessOverlay(true);
+      } else {
+        setWarning(response.message || 'Registration failed. Please try again.');
+      }
+    } catch (err: any) {
+      setWarning('Registration failed. Please try again.');
+    } finally {
+      setRegisterLoading(false);
     }
   };
 
@@ -203,16 +390,11 @@ export default function RegisterScreen() {
 
   const validateStep = (s: number) => {
     if (s === 1) {
-      if (!name.trim()) return 'Please enter your full name';
-      if (!username.trim()) return 'Please enter a username';
-      if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a valid email';
+      if (!isValidEmail(email)) return 'Enter a valid email';
       return null;
     }
     if (s === 2) {
-      const digitsOnly = (v: string) => v.replace(/\D/g, '');
-      if (!phone1.trim()) return 'Please enter your primary phone number';
-      if (digitsOnly(phone1).length < 7) return 'Enter a valid primary phone number';
-      if (phone2.trim() && digitsOnly(phone2).length < 7) return 'Enter a valid secondary phone number';
+      if (!otpVerified) return 'Please verify your email with the code we sent';
       return null;
     }
     if (s === 3) {
@@ -223,14 +405,35 @@ export default function RegisterScreen() {
       if (!agreed) return 'You must agree to the Terms and Conditions';
       return null;
     }
+    if (s === 4) {
+      if (!name.trim()) return 'Please enter your full name';
+      if (!username.trim()) return 'Please enter a username';
+      if (!/^[a-zA-Z0-9_]+$/.test(username.trim())) {
+        return 'Username can only contain letters, numbers, and underscores';
+      }
+      const digitsOnly = (v: string) => v.replace(/\D/g, '');
+      if (phone1.trim() && digitsOnly(phone1).length < 7) return 'Enter a valid primary phone number';
+      if (phone2.trim() && digitsOnly(phone2).length < 7) return 'Enter a valid secondary phone number';
+      return null;
+    }
     return null;
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     const err = validateStep(step);
     if (err) { setWarning(err); return; }
     setWarning(null);
-    setStep(Math.min(3, step + 1));
+
+    if (step === 1) {
+      const ok = await handleRequestOtp();
+      if (!ok) {
+        return;
+      }
+      setStep(2);
+      return;
+    }
+
+    setStep(Math.min(4, step + 1));
   };
 
   const handleBack = () => {
@@ -247,10 +450,12 @@ export default function RegisterScreen() {
       <ScrollView style={{ backgroundColor: C.background }} contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         {/* Stepper */}
         <View style={styles.stepper}>
-          {[1,2,3].map((s) => (
+          {[1, 2, 3, 4].map((s) => (
             <View key={s} style={styles.stepItem}>
               <View style={[styles.stepDot, { backgroundColor: step >= s ? C.primary : C.border }]} />
-              <Text style={[styles.stepLabel, { color: C.textSecondary }]}>{s === 1 ? 'Account' : s === 2 ? 'Phone' : 'Security'}</Text>
+              <Text style={[styles.stepLabel, { color: C.textSecondary }]}>
+                {s === 1 ? 'Email' : s === 2 ? 'Verify' : s === 3 ? 'Security' : 'Profile'}
+              </Text>
             </View>
           ))}
         </View>
@@ -280,38 +485,11 @@ export default function RegisterScreen() {
           </View>
         )}
 
-        <View style={[styles.form, { backgroundColor: C.card, borderColor: C.border }]}> 
+        <View style={[styles.form, { backgroundColor: C.card, borderColor: C.border }]}>
+          {/* Step 1: Email */}
           {step === 1 && (
             <View>
-              <Text style={[styles.label, { color: C.text }]}>Full Name</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-                placeholder="John Doe"
-                value={name}
-                onChangeText={setName}
-                autoCapitalize="words"
-                autoCorrect={false}
-                placeholderTextColor={C.placeholder}
-                editable={!loading}
-              />
-
-              <Text style={[styles.label, { color: C.text }]}>Username</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-                placeholder="johndoe"
-                value={username}
-                onChangeText={setUsername}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="default"
-                placeholderTextColor={C.placeholder}
-                editable={!loading}
-              />
-              <Text style={[styles.helperText, { color: C.textSecondary }]}> 
-                Username can only contain letters, numbers, and underscores
-              </Text>
-
-              <Text style={[styles.label, { color: C.text }]}>Email (Optional)</Text>
+              <Text style={[styles.label, { color: C.text }]}>Email</Text>
               <TextInput
                 style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
                 placeholder="name@example.com"
@@ -321,68 +499,113 @@ export default function RegisterScreen() {
                 autoCorrect={false}
                 keyboardType="email-address"
                 placeholderTextColor={C.placeholder}
-                editable={!loading}
+                editable={!isFormBusy}
               />
-
-              <Text style={[styles.label, { color: C.text }]}>Country</Text>
-              <TouchableOpacity
-                onPress={() => setCountryModalOpen(true)}
-                activeOpacity={0.7}
-                style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, flexDirection: 'row', alignItems: 'center' }]}
-              >
-                <Text style={{ color: C.text, flex: 1 }}>{selectedCountry.name}</Text>
-                <Text style={{ color: C.textSecondary }}>{selectedCountry.dialCode}</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {step === 2 && (
-            <View>
-              <View style={[styles.phoneRow, { marginBottom: 12 }]}> 
-                <Text style={[styles.label, { color: C.text }]}>Primary Phone <Text style={{ color: '#ef4444' }}>*</Text></Text>
-              </View>
-              <View style={styles.phoneInputRow}>
-                <View style={[styles.dialBox, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
-                  <Text style={{ color: C.text }}>{selectedCountry.dialCode}</Text>
-                </View>
-                <TextInput
-                  style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-                  placeholder="7XX XXX XXX"
-                  value={phone1}
-                  onChangeText={setPhone1}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="phone-pad"
-                  placeholderTextColor={C.placeholder}
-                  editable={!loading}
-                />
-              </View>
-
-              <View style={[styles.phoneRow, { marginTop: 16, marginBottom: 12 }]}> 
-                <Text style={[styles.label, { color: C.text }]}>Secondary Phone (Optional)</Text>
-              </View>
-              <View style={styles.phoneInputRow}>
-                <View style={[styles.dialBox, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
-                  <Text style={{ color: C.text }}>{selectedCountry.dialCode}</Text>
-                </View>
-                <TextInput
-                  style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-                  placeholder="7XX XXX XXX"
-                  value={phone2}
-                  onChangeText={setPhone2}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="phone-pad"
-                  placeholderTextColor={C.placeholder}
-                  editable={!loading}
-                />
-              </View>
-              <Text style={[styles.helperText, { color: C.textSecondary }]}> 
-                Your country code is pre-selected. Enter numbers without leading zero.
+              <Text style={[styles.helperText, { color: C.textSecondary }]}>
+                We&apos;ll send a verification code to this email.
               </Text>
             </View>
           )}
 
+          {/* Step 2: Verify (OTP) */}
+          {step === 2 && (
+            <View>
+              <Text style={[styles.label, { color: C.text }]}>Verify your email</Text>
+              <Text style={[styles.helperText, { color: C.textSecondary }]}>
+                We sent a 6-digit code to {email.trim() || 'your email address'} to verify your account.
+              </Text>
+
+              <View style={{ marginTop: 16, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between' }}>
+                {Array.from({ length: OTP_LENGTH }).map((_, index) => (
+                  <TextInput
+                    key={index}
+                    ref={(el) => (otpInputRefs.current[index] = el)}
+                    style={[
+                      {
+                        width: 48,
+                        height: 56,
+                        borderRadius: 14,
+                        borderWidth: 1,
+                        textAlign: 'center',
+                        fontSize: 20,
+                        marginHorizontal: 4,
+                        backgroundColor: C.input,
+                        borderColor: C.inputBorder,
+                        color: C.text,
+                      },
+                      {
+                        shadowColor: '#000',
+                        shadowOpacity: 0.25,
+                        shadowRadius: 8,
+                        shadowOffset: { width: 0, height: 4 },
+                        elevation: 4,
+                      },
+                    ]}
+                    value={otpDigits[index]}
+                    onChangeText={(value) => handleOtpChange(index, value)}
+                    onKeyPress={({ nativeEvent }) => handleOtpKeyPress(index, nativeEvent.key)}
+                    keyboardType="number-pad"
+                    maxLength={1}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="-"
+                    placeholderTextColor={C.placeholder}
+                    editable={!otpVerifyLoading}
+                  />
+                ))}
+              </View>
+
+              {otpCooldownSeconds > 0 ? (
+                <Text style={[styles.helperText, { color: C.textSecondary }]}>
+                  You can request another code in {otpCooldownSeconds}s.
+                </Text>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    {
+                      backgroundColor: otpRequestLoading ? C.buttonDisabled : C.primary,
+                    },
+                  ]}
+                  onPress={handleRequestOtp}
+                  disabled={otpRequestLoading}
+                  activeOpacity={0.8}
+                >
+                  {otpRequestLoading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.buttonText}>Resend code</Text>
+                  )}
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.button,
+                  {
+                    backgroundColor: otpVerifyLoading ? C.buttonDisabled : C.primary,
+                  },
+                ]}
+                onPress={handleVerifyOtp}
+                disabled={otpVerifyLoading}
+                activeOpacity={0.8}
+              >
+                {otpVerifyLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.buttonText}>Verify email</Text>
+                )}
+              </TouchableOpacity>
+
+              {otpVerified && (
+                <Text style={[styles.helperText, { color: '#22c55e' }]}>
+                  Email verified. You can now set your password.
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* Step 3: Security (password) */}
           {step === 3 && (
             <View>
               <Text style={[styles.label, { color: C.text }]}>Password</Text>
@@ -395,7 +618,7 @@ export default function RegisterScreen() {
                   secureTextEntry={!showPassword}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  editable={!loading}
+                  editable={!isFormBusy}
                   placeholderTextColor={C.placeholder}
                 />
                 <Pressable
@@ -424,7 +647,7 @@ export default function RegisterScreen() {
                   secureTextEntry={!showConfirmPassword}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  editable={!loading}
+                  editable={!isFormBusy}
                   placeholderTextColor={C.placeholder}
                 />
                 <Pressable
@@ -461,17 +684,103 @@ export default function RegisterScreen() {
                   </Text>
                 </Text>
               </View>
+            </View>
+          )}
+
+          {/* Step 4: Profile / Onboarding */}
+          {step === 4 && (
+            <View>
+              <Text style={[styles.label, { color: C.text }]}>Display name</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
+                placeholder="John Doe"
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+                autoCorrect={false}
+                placeholderTextColor={C.placeholder}
+                editable={!isFormBusy}
+              />
+
+              <Text style={[styles.label, { color: C.text }]}>Username</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
+                placeholder="johndoe"
+                value={username}
+                onChangeText={setUsername}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="default"
+                placeholderTextColor={C.placeholder}
+                editable={!isFormBusy}
+              />
+              <Text style={[styles.helperText, { color: C.textSecondary }]}>
+                Username can only contain letters, numbers, and underscores
+              </Text>
+
+              <Text style={[styles.label, { color: C.text }]}>Country</Text>
+              <TouchableOpacity
+                onPress={() => setCountryModalOpen(true)}
+                activeOpacity={0.7}
+                style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, flexDirection: 'row', alignItems: 'center' }]}
+              >
+                <Text style={{ color: C.text, flex: 1 }}>{selectedCountry.name}</Text>
+                <Text style={{ color: C.textSecondary }}>{selectedCountry.dialCode}</Text>
+              </TouchableOpacity>
+
+              <View style={[styles.phoneRow, { marginTop: 16, marginBottom: 12 }]}>
+                <Text style={[styles.label, { color: C.text }]}>Primary Phone (Optional)</Text>
+              </View>
+              <View style={styles.phoneInputRow}>
+                <View style={[styles.dialBox, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
+                  <Text style={{ color: C.text }}>{selectedCountry.dialCode}</Text>
+                </View>
+                <TextInput
+                  style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
+                  placeholder="7XX XXX XXX"
+                  value={phone1}
+                  onChangeText={setPhone1}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="phone-pad"
+                  placeholderTextColor={C.placeholder}
+                  editable={!isFormBusy}
+                />
+              </View>
+
+              <View style={[styles.phoneRow, { marginTop: 16, marginBottom: 12 }]}>
+                <Text style={[styles.label, { color: C.text }]}>Secondary Phone (Optional)</Text>
+              </View>
+              <View style={styles.phoneInputRow}>
+                <View style={[styles.dialBox, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
+                  <Text style={{ color: C.text }}>{selectedCountry.dialCode}</Text>
+                </View>
+                <TextInput
+                  style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
+                  placeholder="7XX XXX XXX"
+                  value={phone2}
+                  onChangeText={setPhone2}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="phone-pad"
+                  placeholderTextColor={C.placeholder}
+                  editable={!isFormBusy}
+                />
+              </View>
+              <Text style={[styles.helperText, { color: C.textSecondary }]}>
+                Your country code is pre-selected. Enter numbers without leading zero.
+              </Text>
 
               <TouchableOpacity
-                style={[styles.button, { backgroundColor: loading ? C.buttonDisabled : C.primary }]}
+                style={[styles.button, { backgroundColor: isFormBusy ? C.buttonDisabled : C.primary }]}
                 onPress={handleRegister}
-                disabled={loading}
+                disabled={isFormBusy}
                 activeOpacity={0.8}
               >
-                {loading ? (
+                {isFormBusy ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.buttonText}>Sign Up</Text>
+                  <Text style={styles.buttonText}>Complete Sign Up</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -484,7 +793,7 @@ export default function RegisterScreen() {
                 <Text style={{ color: C.text }}>Back</Text>
               </TouchableOpacity>
             )}
-            {step < 3 && (
+            {step < 4 && (
               <TouchableOpacity style={[styles.navButtonPrimary, { backgroundColor: C.primary }]} onPress={handleNext} activeOpacity={0.8}>
                 <Text style={{ color: '#000', fontWeight: '600' }}>Next</Text>
               </TouchableOpacity>
@@ -577,9 +886,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   stepDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: '80%',
+    height: 4,
+    borderRadius: 999,
     marginBottom: 6,
   },
   stepLabel: {

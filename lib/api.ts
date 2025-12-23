@@ -1,5 +1,16 @@
 import { apiClient } from './api-client';
-import { ApiResponse, Post, User, Notification, LoginResponseData, RegisterFormData, Country } from '../types';
+import {
+  ApiResponse,
+  Post,
+  User,
+  Notification,
+  LoginResponseData,
+  RegisterFormData,
+  Country,
+  RegisterOtpVerifyData,
+  RegisterCompletePayload,
+  PasswordResetVerifyData,
+} from '../types';
 
 // Auth API
 export const authApi = {
@@ -54,6 +65,147 @@ export const authApi = {
         status: 'error',
         message: error.response?.data?.message || 'Registration failed',
         data: {} as LoginResponseData,
+      };
+    }
+  },
+
+  // New OTP-based registration flow
+  requestRegistrationOtp: async (
+    email: string
+  ): Promise<ApiResponse<{ remainingSeconds?: number }>> => {
+    try {
+      const response = await apiClient.post('/api/auth/register/request-otp', { email });
+      return response.data;
+    } catch (error: any) {
+      const message =
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to request verification code';
+
+      const remainingSeconds = error.response?.data?.data?.remainingSeconds;
+
+      return {
+        status: 'error',
+        message,
+        data: { remainingSeconds },
+      };
+    }
+  },
+
+  verifyRegistrationOtp: async (
+    email: string,
+    otpCode: string
+  ): Promise<ApiResponse<RegisterOtpVerifyData & { code?: string }>> => {
+    try {
+      const response = await apiClient.post('/api/auth/register/verify-otp', {
+        email,
+        otpCode,
+      });
+      return response.data;
+    } catch (error: any) {
+      const apiData = error.response?.data;
+      const message =
+        apiData?.message || error.message || 'Failed to verify code';
+
+      return {
+        status: 'error',
+        message,
+        data: {
+          verificationToken: '',
+          email,
+          code: apiData?.data?.code,
+        },
+      };
+    }
+  },
+
+  completeRegistration: async (
+    payload: RegisterCompletePayload
+  ): Promise<ApiResponse<{ user: any }>> => {
+    try {
+      const response = await apiClient.post('/api/auth/register/complete', payload);
+      return response.data;
+    } catch (error: any) {
+      const apiData = error.response?.data;
+      const message =
+        apiData?.message || error.message || 'Registration failed';
+
+      return {
+        status: 'error',
+        message,
+        data: { user: null },
+      };
+    }
+  },
+
+  // Password reset (OTP-based) flow
+  requestPasswordResetOtp: async (
+    email: string
+  ): Promise<ApiResponse<{ remainingSeconds?: number }>> => {
+    try {
+      const response = await apiClient.post('/api/auth/password-reset/request-otp', { email });
+      return response.data;
+    } catch (error: any) {
+      const apiData = error.response?.data;
+      const message =
+        apiData?.message || error.message || 'Failed to request password reset code';
+
+      const remainingSeconds = apiData?.data?.remainingSeconds;
+
+      return {
+        status: 'error',
+        message,
+        data: { remainingSeconds },
+      };
+    }
+  },
+
+  verifyPasswordResetOtp: async (
+    email: string,
+    otpCode: string
+  ): Promise<ApiResponse<PasswordResetVerifyData & { code?: string }>> => {
+    try {
+      const response = await apiClient.post('/api/auth/password-reset/verify-otp', {
+        email,
+        otpCode,
+      });
+      return response.data;
+    } catch (error: any) {
+      const apiData = error.response?.data;
+      const message =
+        apiData?.message || error.message || 'Failed to verify password reset code';
+
+      return {
+        status: 'error',
+        message,
+        data: {
+          resetToken: '',
+          email,
+          code: apiData?.data?.code,
+        },
+      };
+    }
+  },
+
+  resetPassword: async (
+    resetToken: string,
+    newPassword: string
+  ): Promise<ApiResponse<{}>> => {
+    try {
+      const response = await apiClient.post('/api/auth/password-reset/reset', {
+        resetToken,
+        newPassword,
+      });
+      return response.data;
+    } catch (error: any) {
+      const apiData = error.response?.data;
+      const message =
+        apiData?.message || error.message || 'Failed to reset password';
+
+      return {
+        status: 'error',
+        message,
+        data: {},
       };
     }
   },

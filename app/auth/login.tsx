@@ -88,8 +88,8 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </View>
         <View style={styles.header}>
-          <Text style={[styles.title, { color: C.text }]}>Sign in to Talynk</Text>
-          <Text style={[styles.subtitle, { color: C.textSecondary }]}>Welcome back! Please login to your account.</Text>
+          <Text style={[styles.title, { color: C.text }]}>Welcome back!</Text>
+          <Text style={[styles.subtitle, { color: C.textSecondary }]}>Login to continue</Text>
         </View>
 
         {/* Alerts */}
@@ -112,31 +112,36 @@ export default function LoginScreen() {
           </View>
         )}
 
-        <View style={[styles.form, { backgroundColor: C.card, borderColor: C.border }]}> 
-          <Text style={[styles.label, { color: C.text }]}>Username or Email</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-            placeholder="Enter your username or email"
-            value={username}
-            onChangeText={setUsername}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="default"
-            placeholderTextColor={C.placeholder}
-            editable={!loading}
-          />
+        <View style={[styles.form, { backgroundColor: C.card, borderColor: C.border }]}>
+          {/* Username / Email */}
+          <Text style={[styles.label, { color: C.text }]}>Enter your email or username</Text>
+          <View style={[styles.inputWrapper, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
+            <Ionicons name="mail-outline" size={20} color={C.textSecondary} style={styles.inputIconLeft} />
+            <TextInput
+              style={[styles.inputField, { color: C.text }]}
+              placeholder="Enter your email or username"
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="default"
+              placeholderTextColor={C.placeholder}
+              editable={!loading}
+            />
+          </View>
 
+          {/* Password */}
           <View style={{ marginTop: 16 }}>
             <View style={styles.labelRow}>
-              <Text style={[styles.label, { color: C.text }]}>Password</Text>
-              {/* TODO: Implement forgot password screen and route */}
-              {/* <TouchableOpacity onPress={() => router.push('/auth/forgot-password')}>
+              <Text style={[styles.label, { color: C.text }]}>Your password</Text>
+              <TouchableOpacity onPress={() => router.push('/auth/forgot-password')}>
                 <Text style={[styles.forgotText, { color: C.primary }]}>Forgot password?</Text>
-              </TouchableOpacity> */}
+              </TouchableOpacity>
             </View>
-            <View style={[styles.passwordInputContainer, { backgroundColor: C.input, borderColor: C.inputBorder }]}> 
+            <View style={[styles.inputWrapper, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
+              <Ionicons name="lock-closed-outline" size={20} color={C.textSecondary} style={styles.inputIconLeft} />
               <TextInput
-                style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: 'transparent', borderColor: 'transparent', color: C.text }]}
+                style={[styles.inputField, { color: C.text }]}
                 placeholder="••••••••"
                 value={password}
                 onChangeText={setPassword}
@@ -147,7 +152,7 @@ export default function LoginScreen() {
                 placeholderTextColor={C.placeholder}
               />
               <Pressable
-                style={styles.eyeButton}
+                style={styles.inputIconRight}
                 onPress={() => setShowPassword((v) => !v)}
                 hitSlop={10}
               >
@@ -184,7 +189,7 @@ export default function LoginScreen() {
             {loading ? (
               <ActivityIndicator color={C.text} />
             ) : (
-              <Text style={styles.buttonText}>Sign In</Text>
+              <Text style={[styles.buttonText, { color: '#000000' }]}>Login</Text>
             )}
           </TouchableOpacity>
 
@@ -277,20 +282,30 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 16,
     padding: 15,
     fontSize: 16,
     marginBottom: 12,
   },
-  passwordInputContainer: {
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 24,
     borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     marginBottom: 12,
   },
-  eyeButton: {
-    padding: 10,
+  inputField: {
+    flex: 1,
+    fontSize: 16,
+    paddingVertical: 6,
+  },
+  inputIconLeft: {
+    marginRight: 12,
+  },
+  inputIconRight: {
+    paddingLeft: 12,
   },
   rememberRow: {
     flexDirection: 'row',
@@ -304,7 +319,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   button: {
-    borderRadius: 8,
+    borderRadius: 24,
     padding: 15,
     alignItems: 'center',
     marginBottom: 18,
