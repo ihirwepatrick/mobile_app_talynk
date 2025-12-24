@@ -402,14 +402,15 @@ export default function ProfileScreen() {
       <TouchableOpacity 
         style={styles.postItem}
         onPress={() => {
-          setSelectedPost(item);
-          resetVideoState();
-          // Start with native controls if it's a video to avoid decoder issues
-          if (item.video_url) {
-            setUseNativeControls(true);
-            setDecoderErrorDetected(false);
-          }
-          setPostModalVisible(true);
+          // Navigate to full-screen profile feed with current post as initial
+          router.push({
+            pathname: '/profile-feed/[userId]',
+            params: { 
+              userId: user?.id || '', 
+              initialPostId: item.id,
+              status: activeTab 
+            }
+          });
         }}
         activeOpacity={0.8}
       >

@@ -634,15 +634,20 @@ export const userApi = {
     }
   },
 
-  getUserPosts: async (userId: string): Promise<ApiResponse<Post[]>> => {
+  getUserPosts: async (userId: string, page = 1, limit = 20, status = 'approved'): Promise<ApiResponse<any>> => {
     try {
-      const response = await apiClient.get(`/api/users/${userId}/posts`);
+      // Use the appropriate endpoint based on status
+      let endpoint = `/api/users/${userId}/posts`;
+      if (status === 'approved') {
+        endpoint = `/api/users/${userId}/posts/approved`;
+      }
+      const response = await apiClient.get(`${endpoint}?page=${page}&limit=${limit}`);
       return response.data;
     } catch (error: any) {
       return {
         status: 'error',
         message: 'Failed to fetch user posts',
-        data: [],
+        data: { posts: [], pagination: {} },
       };
     }
   },

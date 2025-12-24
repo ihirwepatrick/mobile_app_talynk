@@ -314,8 +314,15 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   };
 
   const handlePostPress = (post: Post) => {
-    setSelectedPost(post);
-    setPostModalVisible(true);
+    // Navigate to full-screen profile feed with current post as initial
+    router.push({
+      pathname: '/profile-feed/[userId]',
+      params: { 
+        userId: id as string, 
+        initialPostId: post.id,
+        status: 'approved'
+      }
+    });
   };
 
   const handleClosePostModal = () => {
