@@ -18,6 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Video, ResizeMode } from 'expo-av';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { postsApi, likesApi, userApi } from '@/lib/api';
+import { API_BASE_URL } from '@/lib/config';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
@@ -85,8 +86,41 @@ const timeAgo = (date: string): string => {
 };
 
 const getMediaUrl = (post: Post): string | null => {
-  const url = (post as any).fullUrl || post.video_url || post.image || post.imageUrl || '';
-  return url && url.trim() !== '' ? url : null;
+  // Check multiple possible field names for media URL
+  const p = post as any;
+  let url = p.fullUrl || 
+            p.video_url || 
+            p.videoUrl ||
+            p.image || 
+            p.imageUrl || 
+            p.thumbnail ||
+            p.media_url ||
+            p.mediaUrl ||
+            '';
+  
+  // Handle relative URLs by prepending API base URL
+  if (url && url.trim() !== '') {
+    url = url.trim();
+    // If URL starts with / but not //, it's a relative path
+    if (url.startsWith('/') && !url.startsWith('//')) {
+      url = `${API_BASE_URL}${url}`;
+    }
+    // If URL doesn't start with http, prepend API base URL
+    else if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `${API_BASE_URL}/${url}`;
+    }
+    return url;
+  }
+  
+  // Debug log to help identify the issue
+  console.log('Post missing media URL:', {
+    id: post.id,
+    title: p.title,
+    type: p.type,
+    availableKeys: Object.keys(p)
+  });
+  
+  return null;
 };
 
 interface PostItemProps {
@@ -560,14 +594,40 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
         setLoadingMore(true);
       }
       
-      // Get user posts by status (default to approved)
-      const postStatus = (status as string) || 'approved';
-      const response = await userApi.getUserPosts(userId as string, page, LIMIT, postStatus);
+      const postStatus = status || 'approved';
+      const isOwnProfile = user && user.id === userId;
       
-      if (response.status === 'success') {
-        const postsData = response.data?.posts || response.data || [];
-        const postsArray = Array.isArray(postsData) ? postsData : [];
-        
+      let response;
+      let postsArray: Post[] = [];
+      
+      if (isOwnProfile) {
+        // Use getOwnPosts for current user's posts (has full data including media URLs)
+        response = await userApi.getOwnPosts();
+        if (response.status === 'success' && response.data?.posts) {
+          let allPosts = response.data.posts || [];
+          // Filter by status
+          if (postStatus === 'approved') {
+            postsArray = allPosts.filter((p: any) => p.status === 'approved' || !p.status);
+          } else if (postStatus === 'pending') {
+            postsArray = allPosts.filter((p: any) => p.status === 'pending');
+          } else if (postStatus === 'rejected') {
+            postsArray = allPosts.filter((p: any) => p.status === 'rejected');
+          } else if (postStatus === 'reported') {
+            postsArray = allPosts.filter((p: any) => p.status === 'reported');
+          } else {
+            postsArray = allPosts;
+          }
+        }
+      } else {
+        // Use getUserPosts for other users' posts
+        response = await userApi.getUserPosts(userId, page, LIMIT, postStatus as string);
+        if (response.status === 'success') {
+          const postsData = response.data?.posts || response.data || [];
+          postsArray = Array.isArray(postsData) ? postsData : [];
+        }
+      }
+      
+      if (response?.status === 'success' && postsArray.length >= 0) {
         const pagination = response.data?.pagination || {};
         const hasMoreData = pagination.hasNextPage !== false && postsArray.length === LIMIT;
         setHasMore(hasMoreData);
