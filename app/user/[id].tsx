@@ -26,6 +26,7 @@ import RealtimeProvider from '@/lib/realtime-context';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import DotsSpinner from '@/components/DotsSpinner';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_CARD_WIDTH = (screenWidth - 48) / 2; // 2 columns with padding
