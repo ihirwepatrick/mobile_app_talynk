@@ -20,8 +20,6 @@
     "@babel/types": "^7.28.0",
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.0.2",
-    "@imgly/camera-react-native": "^1.66.0",
-    "@imgly/editor-react-native": "^1.66.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/native": "^7.1.6",
     "@reduxjs/toolkit": "^2.10.1",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,11 +20,11 @@ import { uploadNotificationService } from '@/lib/notification-service';
 import { categoriesApi } from '@/lib/api';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/lib/auth-context';
-import { API_BASE_URL, IMGLY_LICENSE_KEY } from '@/lib/config';
-import IMGLYCamera, { CameraSettings } from '@imgly/camera-react-native';
-import IMGLYEditor, { EditorPreset, EditorSettingsModel, SourceType } from '@imgly/editor-react-native';
+import { API_BASE_URL } from '@/lib/config';
 import * as FileSystem from 'expo-file-system';
 import { generateThumbnail } from '@/lib/utils/thumbnail';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as MediaLibrary from 'expo-media-library';
 
 // --- CATEGORY STRUCTURE (from web) ---
 const CATEGORIES_STRUCTURE = {
@@ -127,6 +127,13 @@ export default function CreatePostScreen() {
   const [recording, setRecording] = useState(false);
   const [editing, setEditing] = useState(false);
   const [hasOpenedCameraOnMount, setHasOpenedCameraOnMount] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [mediaPermission, requestMediaPermission] = MediaLibrary.usePermissions();
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const cameraRef = useRef<CameraView>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const C = COLORS.dark;
   const [mainCategories, setMainCategories] = useState<{ id: number, name: string, children?: { id: number, name: string }[] }[]>([]);
   const [subcategories, setSubcategories] = useState<{ id: number, name: string }[]>([]);
@@ -230,6 +237,9 @@ export default function CreatePostScreen() {
 
   // --- FETCH CATEGORIES ---
   useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) return;
+
     const loadCategories = async () => {
       setLoadingCategories(true);
       const res = await categoriesApi.getAll();
@@ -241,9 +251,12 @@ export default function CreatePostScreen() {
       setLoadingCategories(false);
     };
     loadCategories();
-  }, []);
+  }, [authLoading, isAuthenticated]);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) return;
+
     const loadSubs = async () => {
       if (!selectedGroup) { setSubcategories([]); return; }
       setLoadingSubcategories(true);
@@ -253,109 +266,152 @@ export default function CreatePostScreen() {
       setLoadingSubcategories(false);
     };
     loadSubs();
-  }, [selectedGroup, mainCategories]);
+  }, [authLoading, isAuthenticated, selectedGroup, mainCategories]);
 
   // --- CAMERA RECORDING ---
   const handleRecordVideo = async () => {
     try {
-      setRecording(true);
-      const cameraSettings: CameraSettings = {
-        // IMGLY SDK expects string | undefined, so map null to undefined
-        license: IMGLY_LICENSE_KEY || undefined,
-        userId: user?.id?.toString() || 'anonymous',
-      };
-
-      const result = await IMGLYCamera.openCamera(cameraSettings);
-
-      if (result === null) {
-        // User cancelled
-        setRecording(false);
-        return;
-      }
-
-      // Handle camera result
-      if (result.recordings && result.recordings.length > 0) {
-        const firstRecording: any = result.recordings[0];
-
-        // Try to enforce a maximum duration of 2:30 (150 seconds) if duration info is available
-        const durationMs: number | undefined =
-          firstRecording?.duration ??
-          firstRecording?.durationMs ??
-          firstRecording?.durationInMs ??
-          firstRecording?.durationInMilliseconds;
-
-        if (typeof durationMs === 'number' && durationMs > 150000) {
-          Alert.alert(
-            'Video Too Long',
-            'Your recording is longer than 2 minutes and 30 seconds. Please record a shorter video.'
-          );
-          setRecordedVideoUri(null);
-          setThumbnailUri(null);
+      // Request permissions
+      if (!cameraPermission?.granted) {
+        const cameraResult = await requestCameraPermission();
+        if (!cameraResult.granted) {
+          Alert.alert('Permission Required', 'Camera permission is required to record videos.');
           return;
         }
+      }
 
-        if (firstRecording.videos && firstRecording.videos.length > 0) {
-          const videoUri = firstRecording.videos[0].uri;
-          setRecordedVideoUri(videoUri);
-
-          // Generate thumbnail
-          const thumb = await generateThumbnail(videoUri);
-          setThumbnailUri(thumb);
-
-          // Automatically open editor
-          handleEditVideo(videoUri);
+      if (!mediaPermission?.granted) {
+        const mediaResult = await requestMediaPermission();
+        if (!mediaResult.granted) {
+          Alert.alert('Permission Required', 'Media library permission is required to save videos.');
+          return;
         }
       }
+
+      setShowCamera(true);
+      setRecordingDuration(0);
     } catch (error: any) {
       console.error('Camera error:', error);
-      Alert.alert('Error', error.message || 'Failed to record video. Please try again.');
-    } finally {
-      setRecording(false);
+      Alert.alert('Error', error.message || 'Failed to open camera. Please try again.');
     }
   };
 
-  // --- VIDEO EDITING ---
-  const handleEditVideo = async (videoUri?: string) => {
-    const videoToEdit = videoUri || recordedVideoUri;
-    if (!videoToEdit) {
-      Alert.alert('Error', 'No video to edit');
-      return;
-    }
+  const startRecording = async () => {
+    if (!cameraRef.current) return;
 
     try {
-      setEditing(true);
-      const editorSettings = new EditorSettingsModel({
-        // IMGLY SDK expects string | undefined, so map null to undefined
-        license: IMGLY_LICENSE_KEY || undefined,
-        userId: user?.id?.toString() || 'anonymous',
+      setIsRecording(true);
+      setRecordingDuration(0);
+      
+      // Start duration timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration((prev) => {
+          const newDuration = prev + 1;
+          // Auto-stop at 2:30 (150 seconds)
+          if (newDuration >= 150) {
+            stopRecording();
+            return 150;
+          }
+          return newDuration;
+        });
+      }, 1000);
+
+      // Start recording (this is async and will resolve when stopRecording is called)
+      const recordingPromise = cameraRef.current.recordAsync({
+        maxDuration: 150, // 2:30 minutes in seconds
       });
-
-      const result = await IMGLYEditor?.openEditor(
-        editorSettings,
-        {
-          source: videoToEdit,
-          type: SourceType.VIDEO,
-        },
-        EditorPreset.VIDEO
-      );
-
-      const editorResult: any = result;
-
-      if (editorResult && editorResult.video) {
-        // Video was edited and exported
-        setEditedVideoUri(editorResult.video);
-        setRecordedVideoUri(editorResult.video);
+      
+      recordingPromise.then((video) => {
+        // This will be called when recording stops
+        setIsRecording(false);
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
         
-        // Regenerate thumbnail for edited video
-        const thumb = await generateThumbnail(editorResult.video);
-        setThumbnailUri(thumb);
-      }
+        if (video && video.uri) {
+          if (recordingDuration > 150) {
+            Alert.alert(
+              'Video Too Long',
+              'Your recording is longer than 2 minutes and 30 seconds. Please record a shorter video.'
+            );
+            setShowCamera(false);
+            setRecordingDuration(0);
+            return;
+          }
+
+          setRecordedVideoUri(video.uri);
+          setEditedVideoUri(null);
+          
+          // Generate thumbnail
+          generateThumbnail(video.uri).then((thumb) => {
+            setThumbnailUri(thumb);
+          }).catch((thumbError) => {
+            console.error('Thumbnail generation error:', thumbError);
+          });
+          
+          setShowCamera(false);
+          setRecordingDuration(0);
+        } else {
+          Alert.alert('Error', 'Failed to save video. Please try again.');
+          setShowCamera(false);
+          setRecordingDuration(0);
+        }
+      }).catch((error: any) => {
+        console.error('Recording promise error:', error);
+        setIsRecording(false);
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        // Don't show error if user cancelled
+        if (error?.message && !error.message.includes('cancel')) {
+          Alert.alert('Error', 'Failed to record video. Please try again.');
+        }
+        setShowCamera(false);
+        setRecordingDuration(0);
+      });
     } catch (error: any) {
-      console.error('Editor error:', error);
-      Alert.alert('Error', error.message || 'Failed to edit video. Please try again.');
-    } finally {
-      setEditing(false);
+      console.error('Recording error:', error);
+      Alert.alert('Error', 'Failed to start recording. Please try again.');
+      setIsRecording(false);
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
     }
+  };
+
+  const stopRecording = () => {
+    if (!cameraRef.current || !isRecording) return;
+
+    setIsRecording(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+
+    // stopRecording() returns void, the video comes from the promise in startRecording
+    cameraRef.current.stopRecording();
+  };
+
+  const cancelCamera = () => {
+    if (isRecording) {
+      stopRecording();
+    }
+    setShowCamera(false);
+    setRecordingDuration(0);
+    setIsRecording(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  };
+
+  // --- VIDEO EDITING --- (Re-record instead of edit)
+  const handleEditVideo = async () => {
+    // For now, just re-record
+    handleRecordVideo();
   };
 
   // --- VALIDATION ---
@@ -545,9 +601,67 @@ export default function CreatePostScreen() {
 
   const currentVideoUri = editedVideoUri || recordedVideoUri;
 
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: C.background }]}>
       <StatusBar style="light" backgroundColor="#000000" />
+
+      {/* Camera Modal */}
+      {showCamera && (
+        <View style={styles.cameraContainer}>
+          <CameraView
+            ref={cameraRef}
+            style={styles.camera}
+            facing="back"
+          >
+            <View style={styles.cameraOverlay}>
+              {/* Top bar with cancel and timer */}
+              <View style={styles.cameraTopBar}>
+                <TouchableOpacity
+                  style={styles.cameraCancelButton}
+                  onPress={cancelCamera}
+                >
+                  <MaterialIcons name="close" size={28} color="#fff" />
+                </TouchableOpacity>
+                {isRecording && (
+                  <View style={styles.recordingIndicator}>
+                    <View style={styles.recordingDot} />
+                    <Text style={styles.recordingTimer}>
+                      {formatDuration(recordingDuration)} / 2:30
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Bottom controls */}
+              <View style={styles.cameraBottomBar}>
+                <View style={styles.cameraControls}>
+                  {!isRecording ? (
+                    <TouchableOpacity
+                      style={styles.recordButtonLarge}
+                      onPress={startRecording}
+                    >
+                      <View style={styles.recordButtonInner} />
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.stopButtonLarge}
+                      onPress={stopRecording}
+                    >
+                      <View style={styles.stopButtonInner} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            </View>
+          </CameraView>
+        </View>
+      )}
 
       {/* STAGE 1: FULL STUDIO (CAMERA) – NO FORMS */}
       {!currentVideoUri && (
@@ -1173,5 +1287,95 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     textAlign: 'center',
+  },
+  cameraContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1000,
+    backgroundColor: '#000',
+  },
+  camera: {
+    flex: 1,
+  },
+  cameraOverlay: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  cameraTopBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 50,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  cameraCancelButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  recordingDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#ef4444',
+    marginRight: 8,
+  },
+  recordingTimer: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cameraBottomBar: {
+    paddingBottom: 40,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  cameraControls: {
+    alignItems: 'center',
+  },
+  recordButtonLarge: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#fff',
+  },
+  recordButtonInner: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#ef4444',
+  },
+  stopButtonLarge: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    backgroundColor: '#ef4444',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stopButtonInner: {
+    width: 32,
+    height: 32,
+    borderRadius: 4,
+    backgroundColor: '#fff',
   },
 });
