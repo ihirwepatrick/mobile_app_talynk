@@ -23,8 +23,7 @@ import { useAuth } from '@/lib/auth-context';
 import { API_BASE_URL } from '@/lib/config';
 import * as FileSystem from 'expo-file-system';
 import { generateThumbnail } from '@/lib/utils/thumbnail';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as MediaLibrary from 'expo-media-library';
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 
 // --- CATEGORY STRUCTURE (from web) ---
 const CATEGORIES_STRUCTURE = {
@@ -129,7 +128,7 @@ export default function CreatePostScreen() {
   const [hasOpenedCameraOnMount, setHasOpenedCameraOnMount] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [mediaPermission, requestMediaPermission] = MediaLibrary.usePermissions();
+  const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const cameraRef = useRef<CameraView>(null);
@@ -271,7 +270,7 @@ export default function CreatePostScreen() {
   // --- CAMERA RECORDING ---
   const handleRecordVideo = async () => {
     try {
-      // Request permissions
+      // Request camera permission
       if (!cameraPermission?.granted) {
         const cameraResult = await requestCameraPermission();
         if (!cameraResult.granted) {
@@ -280,10 +279,11 @@ export default function CreatePostScreen() {
         }
       }
 
-      if (!mediaPermission?.granted) {
-        const mediaResult = await requestMediaPermission();
-        if (!mediaResult.granted) {
-          Alert.alert('Permission Required', 'Media library permission is required to save videos.');
+      // Request microphone permission for audio recording
+      if (!microphonePermission?.granted) {
+        const micResult = await requestMicrophonePermission();
+        if (!micResult.granted) {
+          Alert.alert('Permission Required', 'Microphone permission is required to record audio with your video.');
           return;
         }
       }
@@ -618,6 +618,7 @@ export default function CreatePostScreen() {
             ref={cameraRef}
             style={styles.camera}
             facing="back"
+            mode="video"
           >
             <View style={styles.cameraOverlay}>
               {/* Top bar with cancel and timer */}

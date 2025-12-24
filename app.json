@@ -59,14 +59,6 @@
         }
       ],
       [
-        "expo-media-library",
-        {
-          "photosPermission": "The app accesses your photos to let you share them with your friends.",
-          "savePhotosPermission": "The app needs access to save photos to your device.",
-          "isAccessMediaLocationEnabled": true
-        }
-      ],
-      [
         "expo-notifications"
       ],
       [
