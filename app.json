@@ -14,7 +14,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera to record videos for your posts.",
+        "NSMicrophoneUsageDescription": "This app uses the microphone to record audio for your videos."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -43,6 +47,20 @@
       ],
       [
         "expo-notifications"
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24,
+            "extraMavenRepos": ["https://artifactory.img.ly/artifactory/maven"],
+            "kotlinVersion": "2.0.21"
+          },
+          "ios": {
+            "deploymentTarget": "16.0",
+            "useFrameworks": "dynamic"
+          }
+        }
       ]
     ],
     "experiments": {

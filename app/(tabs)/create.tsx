@@ -6,30 +6,25 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  Image,
   ActivityIndicator,
   ScrollView,
   useColorScheme,
   Platform,
-  Animated,
-  Dimensions,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import * as ImagePicker from 'expo-image-picker';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { postsApi } from '@/lib/api';
-import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { Video, ResizeMode } from 'expo-av';
 import { uploadNotificationService } from '@/lib/notification-service';
 import { categoriesApi } from '@/lib/api';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/lib/auth-context';
-import { API_BASE_URL } from '@/lib/config';
+import { API_BASE_URL, IMGLY_LICENSE_KEY } from '@/lib/config';
+import IMGLYCamera, { CameraSettings } from '@imgly/camera-react-native';
+import IMGLYEditor, { EditorPreset, EditorSettingsModel, SourceType } from '@imgly/editor-react-native';
+import * as FileSystem from 'expo-file-system';
 import { generateThumbnail } from '@/lib/utils/thumbnail';
-
-const { width: screenWidth } = Dimensions.get('window');
 
 // --- CATEGORY STRUCTURE (from web) ---
 const CATEGORIES_STRUCTURE = {
@@ -114,56 +109,30 @@ const COLORS = {
     placeholder: '#71717a',
     buttonDisabled: '#444',
   },
-  light: {
-    background: '#f8fafc',
-    card: '#ffffff',
-    border: '#e2e8f0',
-    text: '#1e293b',
-    textSecondary: '#64748b',
-    primary: '#3b82f6',
-    inputBg: '#ffffff',
-    inputBorder: '#e2e8f0',
-    inputText: '#1e293b',
-    buttonBg: '#3b82f6',
-    buttonText: '#ffffff',
-    spinner: '#3b82f6',
-    error: '#ef4444',
-    success: '#10b981',
-    warning: '#f59e0b',
-    errorBg: '#fef2f2',
-    errorBorder: '#fecaca',
-    successBg: '#f0fdf4',
-    successBorder: '#bbf7d0',
-    warningBg: '#fefce8',
-    warningBorder: '#fde68a',
-    placeholder: '#888',
-    buttonDisabled: '#ccc',
-  },
 };
 
 export default function CreatePostScreen() {
-  const params = useLocalSearchParams<{ videoUri?: string; thumbnailUri?: string; fromCamera?: string; fromGallery?: string }>();
   const { isAuthenticated, loading: authLoading, user, token } = useAuth();
   const [title, setTitle] = useState('');
   const [caption, setCaption] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
-  const [selectedMedia, setSelectedMedia] = useState<{ uri: string; type: 'image' | 'video'; name: string; mimeType?: string; thumbnailUri?: string; fileSize?: number } | null>(null);
+  const [recordedVideoUri, setRecordedVideoUri] = useState<string | null>(null);
+  const [editedVideoUri, setEditedVideoUri] = useState<string | null>(null);
+  const [thumbnailUri, setThumbnailUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errors, setErrors] = useState<{ [k: string]: string }>({});
   const [accordionOpen, setAccordionOpen] = useState(false);
-  const C = COLORS.dark; // Force dark
+  const [recording, setRecording] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [hasOpenedCameraOnMount, setHasOpenedCameraOnMount] = useState(false);
+  const C = COLORS.dark;
   const [mainCategories, setMainCategories] = useState<{ id: number, name: string, children?: { id: number, name: string }[] }[]>([]);
   const [subcategories, setSubcategories] = useState<{ id: number, name: string }[]>([]);
   const insets = useSafeAreaInsets();
   const [loadingCategories, setLoadingCategories] = useState<boolean>(false);
   const [loadingSubcategories, setLoadingSubcategories] = useState<boolean>(false);
-
-  // Animated values for liquid progress
-  const liquidProgress = new Animated.Value(0);
-  const liquidOpacity = new Animated.Value(0);
 
   // --- AUTHENTICATION CHECK ---
   useEffect(() => {
@@ -175,7 +144,7 @@ export default function CreatePostScreen() {
           {
             text: 'Cancel',
             style: 'cancel',
-           onPress: () => router.replace('/')
+            onPress: () => router.replace('/')
           },
           {
             text: 'Sign In',
@@ -185,6 +154,25 @@ export default function CreatePostScreen() {
       );
     }
   }, [isAuthenticated, authLoading]);
+
+  // --- AUTO OPEN CAMERA ON FIRST MOUNT WHEN AUTHENTICATED ---
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) return;
+    if (hasOpenedCameraOnMount) return;
+
+    setHasOpenedCameraOnMount(true);
+
+    // Small delay so the screen can finish rendering before opening the native camera.
+    // This makes auto-open more reliable on some devices / platforms.
+    const timeoutId = setTimeout(() => {
+      handleRecordVideo();
+    }, 400);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [authLoading, isAuthenticated, hasOpenedCameraOnMount]);
 
   // Show loading screen while checking authentication
   if (authLoading) {
@@ -229,11 +217,8 @@ export default function CreatePostScreen() {
   
   const getSelectedCategoryName = () => {
     if (!selectedCategoryId) return '';
-    // First try to find in loaded subcategories
     const foundSub = subcategories.find(cat => String(cat.id) === selectedCategoryId);
     if (foundSub) return foundSub.name;
-    
-    // Fallback to hardcoded structure
     const allCats = Object.values(CATEGORIES_STRUCTURE).flat();
     const found = allCats.find((cat: { id: number; name: string }) => String(cat.id) === selectedCategoryId);
     return found ? found.name : '';
@@ -243,7 +228,6 @@ export default function CreatePostScreen() {
     return selectedCategoryId || '';
   };
 
-  // --- LIQUID PROGRESS ANIMATION ---
   // --- FETCH CATEGORIES ---
   useEffect(() => {
     const loadCategories = async () => {
@@ -270,146 +254,109 @@ export default function CreatePostScreen() {
     };
     loadSubs();
   }, [selectedGroup, mainCategories]);
-  useEffect(() => {
-    if (uploading) {
-      Animated.timing(liquidOpacity, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-    } else {
-      Animated.timing(liquidOpacity, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-    }
-  }, [uploading]);
 
-  useEffect(() => {
-    if (uploading) {
-      Animated.timing(liquidProgress, {
-        toValue: Math.min(uploadProgress, 100),
-        duration: 500,
-        useNativeDriver: false,
-      }).start();
-    } else {
-      Animated.timing(liquidProgress, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-    }
-  }, [uploadProgress, uploading]);
+  // --- CAMERA RECORDING ---
+  const handleRecordVideo = async () => {
+    try {
+      setRecording(true);
+      const cameraSettings: CameraSettings = {
+        // IMGLY SDK expects string | undefined, so map null to undefined
+        license: IMGLY_LICENSE_KEY || undefined,
+        userId: user?.id?.toString() || 'anonymous',
+      };
 
-  // Handle gallery params (if coming from external source)
-  useEffect(() => {
-    if (params.videoUri) {
-      const fileName = params.videoUri.split('/').pop() || 'video.mp4';
-      setSelectedMedia({
-        uri: params.videoUri,
-        type: 'video',
-        name: fileName,
-        mimeType: 'video/mp4',
-        thumbnailUri: params.thumbnailUri,
-      });
-    }
-  }, [params.videoUri, params.thumbnailUri]);
+      const result = await IMGLYCamera.openCamera(cameraSettings);
 
-  // --- MEDIA PICKERS ---
-  const pickMedia = async (mediaType: 'image' | 'video') => {
-    let permissionResult;
-    if (mediaType === 'image') {
-      permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    } else {
-      permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    }
-    if (permissionResult.status !== 'granted') {
-      Alert.alert('Permission needed', 'Please grant media permissions.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: mediaType === 'image' ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos,
-      allowsEditing: true,
-      quality: 0.8,
-      aspect: mediaType === 'video' ? [9, 16] : [1, 1],
-    });
-    if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      const fileName = asset.fileName || asset.uri.split('/').pop() || (mediaType === 'image' ? 'image.jpg' : 'video.mp4');
-      
-      let mimeType = asset.mimeType;
-      if (!mimeType) {
-        const ext = fileName.split('.').pop()?.toLowerCase();
-        if (mediaType === 'image') {
-          mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
-        } else if (mediaType === 'video') {
-          if (ext === 'mov') mimeType = 'video/quicktime';
-          else if (ext === 'webm') mimeType = 'video/webm';
-          else mimeType = 'video/mp4';
-        }
-      }
-      
-      // Check file size - use multiple methods for accuracy
-      let fileSize = 0;
-      
-      // First try to get size from asset directly (most reliable)
-      if (asset.fileSize && asset.fileSize > 0) {
-        fileSize = asset.fileSize;
-      } else {
-        // Fallback to FileSystem
-        try {
-          const fileInfo = await FileSystem.getInfoAsync(asset.uri);
-          if (fileInfo.exists && typeof fileInfo.size === 'number' && fileInfo.size > 0) {
-            fileSize = fileInfo.size;
-          }
-        } catch (e) {
-          console.warn('Could not get file size:', e);
-        }
-      }
-      
-      // Strict 50MB limit (50 * 1024 * 1024 bytes)
-      const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB in bytes
-      
-      if (fileSize > MAX_FILE_SIZE) {
-        const sizeInMB = (fileSize / (1024 * 1024)).toFixed(2);
-        Alert.alert(
-          'File Too Large',
-          `The selected file is ${sizeInMB} MB, which exceeds the maximum allowed size of 50 MB. Please select a smaller file.`,
-          [{ text: 'OK' }]
-        );
+      if (result === null) {
+        // User cancelled
+        setRecording(false);
         return;
       }
-      
-      // Warn if file is close to limit (above 45MB but under 50MB)
-      if (fileSize > 45 * 1024 * 1024 && fileSize <= MAX_FILE_SIZE) {
-        const sizeInMB = (fileSize / (1024 * 1024)).toFixed(2);
-        // Show warning but allow user to proceed
-        Alert.alert(
-          'Large File Warning',
-          `The selected file is ${sizeInMB} MB. Upload may take longer.`,
-          [{ text: 'OK' }]
-        );
-      }
 
-      // Generate thumbnail for videos
-      let thumbnailUri: string | null = null;
-      if (mediaType === 'video') {
-        thumbnailUri = await generateThumbnail(asset.uri);
-      }
+      // Handle camera result
+      if (result.recordings && result.recordings.length > 0) {
+        const firstRecording: any = result.recordings[0];
 
-      setSelectedMedia({ 
-        uri: asset.uri, 
-        type: mediaType, 
-        name: fileName, 
-        mimeType,
-        thumbnailUri: thumbnailUri || undefined,
-        fileSize: fileSize > 0 ? fileSize : undefined,
-      });
+        // Try to enforce a maximum duration of 2:30 (150 seconds) if duration info is available
+        const durationMs: number | undefined =
+          firstRecording?.duration ??
+          firstRecording?.durationMs ??
+          firstRecording?.durationInMs ??
+          firstRecording?.durationInMilliseconds;
+
+        if (typeof durationMs === 'number' && durationMs > 150000) {
+          Alert.alert(
+            'Video Too Long',
+            'Your recording is longer than 2 minutes and 30 seconds. Please record a shorter video.'
+          );
+          setRecordedVideoUri(null);
+          setThumbnailUri(null);
+          return;
+        }
+
+        if (firstRecording.videos && firstRecording.videos.length > 0) {
+          const videoUri = firstRecording.videos[0].uri;
+          setRecordedVideoUri(videoUri);
+
+          // Generate thumbnail
+          const thumb = await generateThumbnail(videoUri);
+          setThumbnailUri(thumb);
+
+          // Automatically open editor
+          handleEditVideo(videoUri);
+        }
+      }
+    } catch (error: any) {
+      console.error('Camera error:', error);
+      Alert.alert('Error', error.message || 'Failed to record video. Please try again.');
+    } finally {
+      setRecording(false);
     }
   };
 
-  const removeMedia = () => setSelectedMedia(null);
+  // --- VIDEO EDITING ---
+  const handleEditVideo = async (videoUri?: string) => {
+    const videoToEdit = videoUri || recordedVideoUri;
+    if (!videoToEdit) {
+      Alert.alert('Error', 'No video to edit');
+      return;
+    }
+
+    try {
+      setEditing(true);
+      const editorSettings = new EditorSettingsModel({
+        // IMGLY SDK expects string | undefined, so map null to undefined
+        license: IMGLY_LICENSE_KEY || undefined,
+        userId: user?.id?.toString() || 'anonymous',
+      });
+
+      const result = await IMGLYEditor?.openEditor(
+        editorSettings,
+        {
+          source: videoToEdit,
+          type: SourceType.VIDEO,
+        },
+        EditorPreset.VIDEO
+      );
+
+      const editorResult: any = result;
+
+      if (editorResult && editorResult.video) {
+        // Video was edited and exported
+        setEditedVideoUri(editorResult.video);
+        setRecordedVideoUri(editorResult.video);
+        
+        // Regenerate thumbnail for edited video
+        const thumb = await generateThumbnail(editorResult.video);
+        setThumbnailUri(thumb);
+      }
+    } catch (error: any) {
+      console.error('Editor error:', error);
+      Alert.alert('Error', error.message || 'Failed to edit video. Please try again.');
+    } finally {
+      setEditing(false);
+    }
+  };
 
   // --- VALIDATION ---
   const validate = async () => {
@@ -420,34 +367,8 @@ export default function CreatePostScreen() {
     else if (caption.length < 10) newErrors.caption = 'Caption must be at least 10 characters';
     if (!selectedGroup) newErrors.group = 'Category group is required';
     if (!selectedCategoryId) newErrors.category = 'Specific category is required';
-    if (!selectedMedia) {
-      newErrors.media = 'Please select an image or video';
-    } else {
-      // Double-check file size before upload
-      const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
-      let fileSize = 0;
-      
-      try {
-        // Try to get size from FileSystem
-        const fileInfo = await FileSystem.getInfoAsync(selectedMedia.uri);
-        if (fileInfo.exists && typeof fileInfo.size === 'number' && fileInfo.size > 0) {
-          fileSize = fileInfo.size;
-        }
-      } catch (e) {
-        console.warn('Could not verify file size:', e);
-      }
-      
-      if (fileSize > MAX_FILE_SIZE) {
-        const sizeInMB = (fileSize / (1024 * 1024)).toFixed(2);
-        Alert.alert(
-          'File Too Large',
-          `The selected file (${sizeInMB} MB) exceeds the maximum allowed size of 50 MB. Please select a smaller file.`,
-          [{ text: 'OK' }]
-        );
-        newErrors.media = 'File size exceeds 50 MB limit';
-        setErrors(newErrors);
-        return false;
-      }
+    if (!recordedVideoUri && !editedVideoUri) {
+      newErrors.media = 'Please record a video';
     }
     
     setErrors(newErrors);
@@ -456,7 +377,6 @@ export default function CreatePostScreen() {
 
   // --- SUBMIT ---
   const handleCreatePost = async () => {
-    // Double-check authentication before creating post
     if (!isAuthenticated || !user) {
       Alert.alert(
         'Authentication Required',
@@ -474,6 +394,12 @@ export default function CreatePostScreen() {
     const isValid = await validate();
     if (!isValid) return;
     
+    const videoUri = editedVideoUri || recordedVideoUri;
+    if (!videoUri) {
+      Alert.alert('Error', 'No video to upload');
+      return;
+    }
+
     // Request notification permissions
     const hasPermission = await uploadNotificationService.requestPermissions();
     if (!hasPermission) {
@@ -481,81 +407,58 @@ export default function CreatePostScreen() {
     }
     
     setUploading(true);
-    setProgress(0);
     setUploadProgress(0);
     
     try {
+      // Get file info
+      const fileInfo = await FileSystem.getInfoAsync(videoUri);
+      if (!fileInfo.exists) {
+        throw new Error('Video file not found');
+      }
+
+      const fileName = videoUri.split('/').pop() || 'video.mp4';
+      
       const formData = new FormData();
       formData.append('title', title);
       formData.append('caption', caption);
       
-      // Send category name for post_category and ID for future matching
       const categoryId = getSelectedCategoryId();
       const categoryName = getSelectedCategoryName();
-      
-      console.log('Sending category data:', { 
-        categoryId, 
-        categoryName, 
-        selectedGroup, 
-        selectedCategoryId 
-      });
       
       formData.append('post_category', categoryName);
       formData.append('category_id', categoryId);
       
-      if (selectedMedia) {
-        formData.append('file', {
-          uri: selectedMedia.uri,
-          name: selectedMedia.name,
-          type: selectedMedia.mimeType || (selectedMedia.type === 'image' ? 'image/jpeg' : 'video/mp4'),
-        } as any);
-      }
+      formData.append('file', {
+        uri: videoUri,
+        name: fileName,
+        type: 'video/mp4',
+      } as any);
       
       const xhr = new XMLHttpRequest();
-      // Use the same API URL as apiClient
       const apiUrl = `${API_BASE_URL}/api/posts`;
-      
-      console.log('Creating post request to:', apiUrl);
       
       xhr.open('POST', apiUrl);
       xhr.setRequestHeader('Accept', 'application/json');
       
-      // Get token from AsyncStorage (same way apiClient does it)
-      // This ensures consistency with other API calls
       const authToken = await AsyncStorage.getItem('talynk_token');
       
       if (!authToken) {
-        console.error('No token found in AsyncStorage');
         setUploading(false);
         setUploadProgress(0);
-        setProgress(0);
         Alert.alert('Authentication Error', 'Please login again to create posts.');
         router.push('/auth/login');
         return;
       }
       
-      // Clean token (remove any whitespace)
       const cleanToken = authToken.trim();
-      
-      console.log('Token retrieved, length:', cleanToken.length);
-      console.log('Token preview:', cleanToken.substring(0, 30) + '...');
-      console.log('User from auth context:', user?.id, user?.username);
-      
-      // Set Authorization header exactly like apiClient does
       xhr.setRequestHeader('Authorization', `Bearer ${cleanToken}`);
-      
-      console.log('Request configured with Authorization header');
       
       let lastLoggedPercent = -10;
       xhr.upload.onprogress = async (event) => {
         if (event.lengthComputable) {
-          // Cap progress at 100%
           const percent = Math.min(Math.round((event.loaded / event.total) * 100), 100);
           setUploadProgress(percent);
-          setProgress(percent);
-          
-          // Update notification with progress (capped at 100%)
-          await uploadNotificationService.showUploadProgress(percent, selectedMedia?.name);
+          await uploadNotificationService.showUploadProgress(percent, fileName);
           
           if (percent - lastLoggedPercent >= 10 || percent === 100) {
             console.log(`Upload progress: ${percent}%`);
@@ -567,30 +470,12 @@ export default function CreatePostScreen() {
       xhr.onload = async () => {
         setUploading(false);
         setUploadProgress(0);
-        setProgress(0);
         
-        // Handle 401 Unauthorized - token expired or invalid
         if (xhr.status === 401) {
-          let errorMessage = 'Authentication failed.';
-          try {
-            const errorResponse = JSON.parse(xhr.responseText);
-            errorMessage = errorResponse.message || errorResponse.data?.message || errorMessage;
-            console.error('401 Error Response:', errorResponse);
-          } catch (e) {
-            console.error('401 Error - Could not parse response:', xhr.responseText);
-          }
-          
-          console.error('401 Unauthorized Details:', {
-            status: xhr.status,
-            statusText: xhr.statusText,
-            responseText: xhr.responseText,
-            allResponseHeaders: xhr.getAllResponseHeaders(),
-          });
-          
-          await uploadNotificationService.showUploadError('Authentication failed. Please login again.', selectedMedia?.name);
+          await uploadNotificationService.showUploadError('Authentication failed. Please login again.', fileName);
           Alert.alert(
             'Authentication Error',
-            errorMessage + ' Please login again to create posts.',
+            'Authentication failed. Please login again to create posts.',
             [
               {
                 text: 'Login',
@@ -605,8 +490,7 @@ export default function CreatePostScreen() {
           try {
             const response = JSON.parse(xhr.responseText);
             if (response.status === 'success') {
-              // Show success notification
-              await uploadNotificationService.showUploadComplete(selectedMedia?.name);
+              await uploadNotificationService.showUploadComplete(fileName);
               
               Alert.alert(
                 'Success', 
@@ -615,22 +499,30 @@ export default function CreatePostScreen() {
                   { 
                     text: 'View Profile', 
                     onPress: () => {
-                      // Navigate to profile with pending tab selected
                       router.replace('/(tabs)/profile');
                     }
                   }
                 ]
               );
+              
+              // Reset form
+              setTitle('');
+              setCaption('');
+              setSelectedGroup('');
+              setSelectedCategoryId('');
+              setRecordedVideoUri(null);
+              setEditedVideoUri(null);
+              setThumbnailUri(null);
             } else {
-              await uploadNotificationService.showUploadError(response.message || 'Failed to create post', selectedMedia?.name);
+              await uploadNotificationService.showUploadError(response.message || 'Failed to create post', fileName);
               Alert.alert('Error', response.message || 'Failed to create post');
             }
           } catch (e) {
-            await uploadNotificationService.showUploadError('Failed to parse server response', selectedMedia?.name);
+            await uploadNotificationService.showUploadError('Failed to parse server response', fileName);
             Alert.alert('Error', 'Failed to parse server response.');
           }
         } else {
-          await uploadNotificationService.showUploadError(`Server responded with status ${xhr.status}`, selectedMedia?.name);
+          await uploadNotificationService.showUploadError(`Server responded with status ${xhr.status}`, fileName);
           Alert.alert('Error', `Failed to create post. Server responded with status ${xhr.status}`);
         }
       };
@@ -638,8 +530,7 @@ export default function CreatePostScreen() {
       xhr.onerror = async () => {
         setUploading(false);
         setUploadProgress(0);
-        setProgress(0);
-        await uploadNotificationService.showUploadError('Network or server error', selectedMedia?.name);
+        await uploadNotificationService.showUploadError('Network or server error', fileName);
         Alert.alert('Error', 'Failed to create post. Network or server error.');
       };
       
@@ -647,337 +538,364 @@ export default function CreatePostScreen() {
     } catch (error: any) {
       setUploading(false);
       setUploadProgress(0);
-      setProgress(0);
-      await uploadNotificationService.showUploadError(error.message || 'Failed to create post', selectedMedia?.name);
+      await uploadNotificationService.showUploadError(error.message || 'Failed to create post', 'video.mp4');
       Alert.alert('Error', error.message || 'Failed to create post. Please try again.');
     }
   };
 
-  // --- LIQUID PROGRESS COMPONENT ---
-  const LiquidProgressBar = () => {
-    const progressWidth = liquidProgress.interpolate({
-      inputRange: [0, 100],
-      outputRange: ['0%', '100%'],
-    });
-
-    return (
-      <Animated.View style={[styles.liquidProgressContainer, { opacity: liquidOpacity }]}>
-        <View style={styles.liquidProgressTrack}>
-          <Animated.View 
-            style={[
-              styles.liquidProgressFill,
-              { 
-                width: progressWidth,
-                backgroundColor: C.primary,
-              }
-            ]} 
-          />
-          <View style={styles.liquidBubbles}>
-            {[0, 1, 2, 3, 4].map((i) => (
-              <Animated.View
-                key={i}
-                style={[
-                  styles.liquidBubble,
-                  {
-                    backgroundColor: C.primary,
-                    left: `${i * 20}%`,
-                    opacity: liquidProgress.interpolate({
-                      inputRange: [i * 20, (i + 1) * 20],
-                      outputRange: [0.3, 0.8],
-                      extrapolate: 'clamp',
-                    }),
-                  }
-                ]}
-              />
-            ))}
-          </View>
-        </View>
-        <Text style={[styles.progressText, { color: C.text }]}>
-          Uploading... {Math.min(Math.round(uploadProgress), 100)}%
-        </Text>
-      </Animated.View>
-    );
-  };
+  const currentVideoUri = editedVideoUri || recordedVideoUri;
 
   return (
     <View style={[styles.container, { backgroundColor: C.background }]}>
       <StatusBar style="light" backgroundColor="#000000" />
-      {/* Upload Progress Bar */}
-      {uploading && <LiquidProgressBar />}
-      
-      <ScrollView 
-        style={[styles.scrollView, { backgroundColor: C.background }]}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Content Authenticity Warning Accordion */}
-        <View style={[styles.warningBox, { backgroundColor: C.card, borderColor: C.warning, marginTop: insets.top + 8 }]}> 
-          <TouchableOpacity 
-            style={styles.accordionHeader}
-            onPress={() => setAccordionOpen(!accordionOpen)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.warningHeader}>
-              <MaterialIcons name="warning" size={24} color={C.warning} />
-              <Text style={[styles.warningTitle, { color: C.warning }]}>Content Authenticity</Text>
-            </View>
-            <MaterialIcons 
-              name={accordionOpen ? "expand-less" : "expand-more"} 
-              size={24} 
-              color={C.warning} 
-            />
-          </TouchableOpacity>
-          
-          {accordionOpen && (
-            <View style={styles.accordionContent}>
-              <Text style={[styles.warningText, { color: C.text }]}>
-                All content must be 100% authentic and showcase natural talent only.
-              </Text>
-              <Text style={[styles.warningList, { color: C.textSecondary }]}>
-                • No AI-enhanced or AI-generated content{'\n'}
-                • No deepfake videos or manipulated media{'\n'}
-                • No voice changers or audio manipulation{'\n'}
-                • No filters that alter performance quality
-              </Text>
-            </View>
-          )}
-      </View>
 
-        {/* Form Content */}
-        <View style={styles.formContainer}>
-        {/* Title */}
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: C.text }]}>Title</Text>
-        <TextInput
-              style={[
-                styles.input, 
-                { 
-                  color: C.inputText, 
-                  backgroundColor: C.inputBg, 
-                  borderColor: errors.title ? C.error : C.inputBorder 
-                }
-              ]}
-              placeholder="Give your post a compelling title"
-          placeholderTextColor={C.textSecondary}
-          value={title}
-          onChangeText={setTitle}
-        />
-            {errors.title && <Text style={[styles.errorText, { color: C.error }]}>{errors.title}</Text>}
+      {/* STAGE 1: FULL STUDIO (CAMERA) – NO FORMS */}
+      {!currentVideoUri && (
+        <View style={[styles.studioContainer, { paddingTop: insets.top + 16 }]}>
+          <View style={styles.studioHeader}>
+            <Text style={[styles.studioTitle, { color: C.text }]}>Create Post Studio</Text>
+            <Text style={[styles.studioSubtitle, { color: C.textSecondary }]}>
+              We use an in-app camera studio. Record a video up to 2 min 30 sec. You&apos;ll add caption and categories after you confirm.
+            </Text>
           </View>
 
-        {/* Caption */}
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: C.text }]}>Caption</Text>
-        <TextInput
-              style={[
-                styles.textarea, 
-                { 
-                  color: C.inputText, 
-                  backgroundColor: C.inputBg, 
-                  borderColor: errors.caption ? C.error : C.inputBorder 
-                }
-              ]}
-              placeholder="Describe your post and what makes it special..."
-          placeholderTextColor={C.textSecondary}
-          value={caption}
-          onChangeText={setCaption}
-          multiline
-          numberOfLines={4}
-          textAlignVertical="top"
-        />
-            {errors.caption && <Text style={[styles.errorText, { color: C.error }]}>{errors.caption}</Text>}
-          </View>
+          <View style={styles.studioBody}>
+            <MaterialIcons name="videocam" size={72} color={C.primary} />
+            <Text style={[styles.studioHint, { color: C.textSecondary }]}>
+              The camera studio should open automatically. If it does not, tap the button below.
+            </Text>
 
-        {/* Category Group */}
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: C.text }]}>Category Group</Text>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.pillRow}
-            >
-          {loadingCategories ? (
-            [1,2,3,4,5,6].map((i) => (
-              <View key={`cat-skel-${i}`} style={[styles.pillSkeleton, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]} />
-            ))
-          ) : (
-            (mainCategories.length ? mainCategories.map(c => c.name) : MAIN_CATEGORY_GROUPS).map(group => (
             <TouchableOpacity
-              key={group}
-                  style={[
-                    styles.pill, 
-                    selectedGroup === group && { backgroundColor: C.primary, borderColor: C.primary }
-                  ]}
-              onPress={() => { setSelectedGroup(group); setSelectedCategoryId(''); }}
+              style={[
+                styles.recordButton,
+                { backgroundColor: C.primary, marginTop: 24 },
+                (recording || editing) && styles.createButtonDisabled,
+              ]}
+              onPress={handleRecordVideo}
+              disabled={recording || editing}
             >
-                  <Text style={[
-                    styles.pillText, 
-                    { color: selectedGroup === group ? C.buttonText : C.text }
-                  ]}>
-                    {group}
+              {recording ? (
+                <ActivityIndicator color={C.buttonText} />
+              ) : (
+                <>
+                  <MaterialIcons name="videocam" size={24} color={C.buttonText} />
+                  <Text style={[styles.recordButtonText, { color: C.buttonText }]}>
+                    Open Camera Studio
                   </Text>
+                </>
+              )}
             </TouchableOpacity>
-            ))
-          )}
-            </ScrollView>
-            {errors.group && <Text style={[styles.errorText, { color: C.error }]}>{errors.group}</Text>}
-        </View>
 
-        {/* Specific Category */}
-          {selectedGroup && (
+            <Text style={[styles.studioWarning, { color: C.warning }]}>
+              Make sure your content is 100% authentic. No AI, deepfakes, or manipulated media.
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* STAGE 2: DETAILS FORM (AFTER VIDEO CONFIRMED) */}
+      {currentVideoUri && (
+        <ScrollView
+          style={[styles.scrollView, { backgroundColor: C.background }]}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Content Authenticity Warning Accordion */}
+          <View
+            style={[
+              styles.warningBox,
+              { backgroundColor: C.card, borderColor: C.warning, marginTop: insets.top + 8 },
+            ]}
+          >
+            <TouchableOpacity
+              style={styles.accordionHeader}
+              onPress={() => setAccordionOpen(!accordionOpen)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.warningHeader}>
+                <MaterialIcons name="warning" size={24} color={C.warning} />
+                <Text style={[styles.warningTitle, { color: C.warning }]}>Content Authenticity</Text>
+              </View>
+              <MaterialIcons
+                name={accordionOpen ? 'expand-less' : 'expand-more'}
+                size={24}
+                color={C.warning}
+              />
+            </TouchableOpacity>
+
+            {accordionOpen && (
+              <View style={styles.accordionContent}>
+                <Text style={[styles.warningText, { color: C.text }]}>
+                  All content must be 100% authentic and showcase natural talent only.
+                </Text>
+                <Text style={[styles.warningList, { color: C.textSecondary }]}>
+                  • No AI-enhanced or AI-generated content{'\n'}
+                  • No deepfake videos or manipulated media{'\n'}
+                  • No voice changers or audio manipulation{'\n'}
+                  • No filters that alter performance quality
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Form Content – ONLY AFTER VIDEO IS CONFIRMED */}
+          <View style={styles.formContainer}>
+            {/* Video Summary / Controls */}
             <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: C.text }]}>Specific Category</Text>
-              <ScrollView 
-                horizontal 
+              <Text style={[styles.label, { color: C.text }]}>Your Video</Text>
+              <View
+                style={[
+                  styles.mediaCard,
+                  {
+                    backgroundColor: C.card,
+                    borderColor: errors.media ? C.error : C.border,
+                  },
+                ]}
+              >
+                <View style={styles.mediaPreview}>
+                  <View style={styles.previewContainer}>
+                    {thumbnailUri ? (
+                      <View style={styles.videoThumbnail}>
+                        <MaterialIcons name="play-circle-filled" size={64} color="#fff" />
+                      </View>
+                    ) : (
+                      <View style={[styles.videoThumbnail, { backgroundColor: C.inputBg }]}>
+                        <ActivityIndicator size="large" color={C.primary} />
+                      </View>
+                    )}
+                    <TouchableOpacity
+                      style={[styles.removeButton, { backgroundColor: C.error }]}
+                      onPress={() => {
+                        setRecordedVideoUri(null);
+                        setEditedVideoUri(null);
+                        setThumbnailUri(null);
+                        setTitle('');
+                        setCaption('');
+                        setSelectedGroup('');
+                        setSelectedCategoryId('');
+                      }}
+                    >
+                      <MaterialIcons name="close" size={20} color={C.buttonText} />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={[styles.mediaFileName, { color: C.textSecondary }]}>
+                    Video ready – you can still edit or re-record if needed.
+                  </Text>
+                  <View style={styles.videoActionButtons}>
+                    <TouchableOpacity
+                      style={[styles.editButton, { backgroundColor: C.primary }]}
+                      onPress={() => handleEditVideo()}
+                      disabled={editing || uploading}
+                    >
+                      {editing ? (
+                        <ActivityIndicator color={C.buttonText} />
+                      ) : (
+                        <>
+                          <MaterialIcons name="edit" size={20} color={C.buttonText} />
+                          <Text style={[styles.editButtonText, { color: C.buttonText }]}>
+                            Open Studio Again
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.rerecordButton, { borderColor: C.border }]}
+                      onPress={handleRecordVideo}
+                      disabled={recording || editing || uploading}
+                    >
+                      <MaterialIcons name="refresh" size={20} color={C.text} />
+                      <Text style={[styles.rerecordButtonText, { color: C.text }]}>
+                        Re-record
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+              {errors.media && <Text style={[styles.errorText, { color: C.error }]}>{errors.media}</Text>}
+            </View>
+
+            {/* Caption */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: C.text }]}>Caption</Text>
+              <TextInput
+                style={[
+                  styles.textarea,
+                  {
+                    color: C.inputText,
+                    backgroundColor: C.inputBg,
+                    borderColor: errors.caption ? C.error : C.inputBorder,
+                  },
+                ]}
+                placeholder="Describe your post and what makes it special..."
+                placeholderTextColor={C.textSecondary}
+                value={caption}
+                onChangeText={setCaption}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+              {errors.caption && (
+                <Text style={[styles.errorText, { color: C.error }]}>{errors.caption}</Text>
+              )}
+            </View>
+
+            {/* Category Group */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: C.text }]}>Category Group</Text>
+              <ScrollView
+                horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.pillRow}
               >
-          {loadingSubcategories ? (
-            [1,2,3,4].map((i) => (
-              <View key={`subcat-skel-${i}`} style={[styles.pillSkeleton, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]} />
-            ))
-          ) : (
-            (subcategories.length ? subcategories : getCategoriesForGroup()).map((cat: { id: number; name: string }) => (
-              <TouchableOpacity
-                key={cat.id}
+                {loadingCategories ? (
+                  [1, 2, 3, 4, 5, 6].map((i) => (
+                    <View
+                      key={`cat-skel-${i}`}
                       style={[
-                        styles.pill, 
-                        selectedCategoryId === String(cat.id) && { backgroundColor: C.primary, borderColor: C.primary }
+                        styles.pillSkeleton,
+                        { backgroundColor: C.inputBg, borderColor: C.inputBorder },
                       ]}
-                onPress={() => setSelectedCategoryId(String(cat.id))}
-              >
-                      <Text style={[
-                        styles.pillText, 
-                        { color: selectedCategoryId === String(cat.id) ? C.buttonText : C.text }
-                      ]}>
-                        {cat.name}
-                      </Text>
-              </TouchableOpacity>
-            ))
-          )}
+                    />
+                  ))
+                ) : (
+                  (mainCategories.length ? mainCategories.map((c) => c.name) : MAIN_CATEGORY_GROUPS).map(
+                    (group) => (
+                      <TouchableOpacity
+                        key={group}
+                        style={[
+                          styles.pill,
+                          selectedGroup === group && {
+                            backgroundColor: C.primary,
+                            borderColor: C.primary,
+                          },
+                        ]}
+                        onPress={() => {
+                          setSelectedGroup(group);
+                          setSelectedCategoryId('');
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.pillText,
+                            { color: selectedGroup === group ? C.buttonText : C.text },
+                          ]}
+                        >
+                          {group}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  )
+                )}
               </ScrollView>
-              {errors.category && <Text style={[styles.errorText, { color: C.error }]}>{errors.category}</Text>}
-        </View>
-          )}
-
-        {/* Media Upload */}
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: C.text }]}>Media Upload</Text>
-            <View style={[
-              styles.mediaCard, 
-              { 
-                backgroundColor: C.card,
-                borderColor: errors.media ? C.error : C.border 
-              }
-            ]}>
-              {!selectedMedia ? (
-                <View style={styles.mediaUploadArea}>
-                  <MaterialIcons name="cloud-upload" size={48} color={C.textSecondary} />
-                  <Text style={[styles.mediaUploadText, { color: C.textSecondary }]}>
-                    Choose your media
-                  </Text>
-          <View style={styles.mediaButtonsRow}>
-                    <TouchableOpacity 
-                      style={[styles.mediaButton, { backgroundColor: C.primary }]} 
-                      onPress={() => pickMedia('image')}
-                    >
-                      <MaterialIcons name="photo-library" size={20} color={C.buttonText} />
-                      <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Image</Text>
-            </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={[styles.mediaButton, { backgroundColor: C.primary }]} 
-                      onPress={() => pickMedia('video')}
-                    >
-                      <MaterialIcons name="video-library" size={20} color={C.buttonText} />
-                      <Text style={[styles.mediaButtonText, { color: C.buttonText }]}>Video</Text>
-            </TouchableOpacity>
-          </View>
-                </View>
-              ) : (
-                <View style={styles.mediaPreview}>
-                  <View style={styles.previewContainer}>
-              {selectedMedia.type === 'image' ? (
-                <Image source={{ uri: selectedMedia.uri }} style={styles.previewImage} />
-              ) : (
-                      <View style={styles.videoPreview}>
-                        <Video
-                          source={{ uri: selectedMedia.uri }}
-                          style={styles.previewVideo}
-                          resizeMode={ResizeMode.COVER}
-                          useNativeControls={false}
-                          shouldPlay={true}
-                          isLooping={true}
-                          shouldCorrectPitch={true}
-                          volume={0.0}
-                          posterStyle={{ resizeMode: 'cover' }}
-                        />
-                        <View style={styles.playIconOverlay}>
-                          <MaterialIcons name="play-circle-outline" size={48} color="#fff" />
-                        </View>
-                      </View>
+              {errors.group && (
+                <Text style={[styles.errorText, { color: C.error }]}>{errors.group}</Text>
               )}
-              <TouchableOpacity
-                style={[styles.removeButton, { backgroundColor: C.error }]}
-                onPress={removeMedia}
-              >
-                      <MaterialIcons name="close" size={20} color={C.buttonText} />
-              </TouchableOpacity>
-                  </View>
-                  <Text style={[styles.mediaFileName, { color: C.textSecondary }]}>
-                    {selectedMedia.name}
-                  </Text>
-                  {selectedMedia.fileSize && (
-                    <Text style={[styles.mediaFileSize, { color: C.textSecondary }]}>
-                      {(selectedMedia.fileSize / (1024 * 1024)).toFixed(2)} MB
-                    </Text>
+            </View>
+
+            {/* Specific Category */}
+            {selectedGroup && (
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: C.text }]}>Specific Category</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.pillRow}
+                >
+                  {loadingSubcategories ? (
+                    [1, 2, 3, 4].map((i) => (
+                      <View
+                        key={`subcat-skel-${i}`}
+                        style={[
+                          styles.pillSkeleton,
+                          { backgroundColor: C.inputBg, borderColor: C.inputBorder },
+                        ]}
+                      />
+                    ))
+                  ) : (
+                    (subcategories.length ? subcategories : getCategoriesForGroup()).map(
+                      (cat: { id: number; name: string }) => (
+                        <TouchableOpacity
+                          key={cat.id}
+                          style={[
+                            styles.pill,
+                            selectedCategoryId === String(cat.id) && {
+                              backgroundColor: C.primary,
+                              borderColor: C.primary,
+                            },
+                          ]}
+                          onPress={() => setSelectedCategoryId(String(cat.id))}
+                        >
+                          <Text
+                            style={[
+                              styles.pillText,
+                              {
+                                color:
+                                  selectedCategoryId === String(cat.id) ? C.buttonText : C.text,
+                              },
+                            ]}
+                          >
+                            {cat.name}
+                          </Text>
+                        </TouchableOpacity>
+                      )
+                    )
                   )}
-                </View>
-              )}
-            </View>
-            {errors.media && <Text style={[styles.errorText, { color: C.error }]}>{errors.media}</Text>}
-        </View>
+                </ScrollView>
+                {errors.category && (
+                  <Text style={[styles.errorText, { color: C.error }]}>{errors.category}</Text>
+                )}
+              </View>
+            )}
 
-        {/* Upload Progress Indicator Above Button */}
-        {uploading && (
-          <View style={[styles.uploadProgressContainer, { backgroundColor: C.card, borderColor: C.border }]}>
-            <View style={styles.uploadProgressBarContainer}>
-              <View 
+            {/* Upload Progress Indicator */}
+            {uploading && (
+              <View
                 style={[
-                  styles.uploadProgressBar, 
-                  { 
-                    width: `${Math.min(Math.max(uploadProgress, 0), 100)}%`,
-                    backgroundColor: C.primary 
-                  }
-                ]} 
-              />
-            </View>
-            <Text style={[styles.uploadProgressText, { color: C.text }]}>
-              Uploading... {Math.min(Math.round(uploadProgress), 100)}%
-            </Text>
-          </View>
-        )}
+                  styles.uploadProgressContainer,
+                  { backgroundColor: C.card, borderColor: C.border },
+                ]}
+              >
+                <View style={styles.uploadProgressBarContainer}>
+                  <View
+                    style={[
+                      styles.uploadProgressBar,
+                      {
+                        width: `${Math.min(Math.max(uploadProgress, 0), 100)}%`,
+                        backgroundColor: C.primary,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[styles.uploadProgressText, { color: C.text }]}>
+                  Uploading... {Math.min(Math.round(uploadProgress), 100)}%
+                </Text>
+              </View>
+            )}
 
-        {/* Submit Button */}
-        <TouchableOpacity
-          style={[
-            styles.createButton, 
-              { backgroundColor: C.primary },
-            uploading && styles.createButtonDisabled
-          ]}
-          onPress={handleCreatePost}
-          disabled={uploading}
-        >
-          {uploading ? (
-              <ActivityIndicator color={C.buttonText} />
-          ) : (
-              <>
-                <MaterialIcons name="send" size={20} color={C.buttonText} />
-                <Text style={[styles.createButtonText, { color: C.buttonText }]}>Create Post</Text>
-              </>
-          )}
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+            {/* Submit Button */}
+            <TouchableOpacity
+              style={[
+                styles.createButton,
+                { backgroundColor: C.primary },
+                uploading && styles.createButtonDisabled,
+              ]}
+              onPress={handleCreatePost}
+              disabled={uploading || !currentVideoUri}
+            >
+              {uploading ? (
+                <ActivityIndicator color={C.buttonText} />
+              ) : (
+                <>
+                  <MaterialIcons name="send" size={20} color={C.buttonText} />
+                  <Text style={[styles.createButtonText, { color: C.buttonText }]}>
+                    Publish Post
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -991,6 +909,37 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 40,
+  },
+  studioContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  studioHeader: {
+    marginBottom: 24,
+  },
+  studioTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  studioSubtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  studioBody: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  studioHint: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 16,
+  },
+  studioWarning: {
+    fontSize: 12,
+    marginTop: 24,
+    textAlign: 'center',
   },
   accordionHeader: {
     flexDirection: 'row',
@@ -1095,24 +1044,28 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
   },
   mediaUploadText: {
-    fontSize: 16,
-    marginTop: 8,
-    marginBottom: 16,
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
   },
-  mediaButtonsRow: {
-    flexDirection: 'row',
-    gap: 12,
+  mediaUploadSubtext: {
+    fontSize: 14,
+    marginBottom: 24,
+    textAlign: 'center',
   },
-  mediaButton: {
+  recordButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
     borderRadius: 12,
-    gap: 8,
+    gap: 12,
+    minWidth: 200,
+    justifyContent: 'center',
   },
-  mediaButtonText: {
-    fontSize: 14,
+  recordButtonText: {
+    fontSize: 16,
     fontWeight: '600',
   },
   mediaPreview: {
@@ -1122,31 +1075,17 @@ const styles = StyleSheet.create({
   previewContainer: {
     position: 'relative',
     marginBottom: 12,
-  },
-  previewImage: {
-    width: screenWidth - 80,
-    height: (screenWidth - 80) * 0.75,
-    borderRadius: 12,
-  },
-  videoPreview: {
-    width: screenWidth - 80,
-    height: (screenWidth - 80) * 0.75,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  previewVideo: {
     width: '100%',
-    height: '100%',
+    alignItems: 'center',
   },
-  playIconOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  videoThumbnail: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    overflow: 'hidden',
   },
   removeButton: {
     position: 'absolute',
@@ -1159,14 +1098,43 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   mediaFileName: {
-    fontSize: 12,
-    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 16,
   },
-  mediaFileSize: {
-    fontSize: 11,
-    textAlign: 'center',
-    marginTop: 4,
-    opacity: 0.7,
+  videoActionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  editButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 8,
+  },
+  editButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  rerecordButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
+  },
+  rerecordButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   createButton: {
     flexDirection: 'row',
@@ -1183,41 +1151,6 @@ const styles = StyleSheet.create({
   createButtonText: {
     fontSize: 16,
     fontWeight: '600',
-  },
-  liquidProgressContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-  },
-  liquidProgressTrack: {
-    height: 8,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 4,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  liquidProgressFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  liquidBubbles: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  liquidBubble: {
-    position: 'absolute',
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    top: 0,
   },
   uploadProgressContainer: {
     marginBottom: 16,
@@ -1241,10 +1174,4 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
   },
-  progressText: {
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: 4,
-    fontWeight: '500',
-  },
-}); 
+});
