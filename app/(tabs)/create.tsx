@@ -10,6 +10,8 @@ import {
   ScrollView,
   useColorScheme,
   Platform,
+  Dimensions,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
@@ -21,9 +23,12 @@ import { categoriesApi } from '@/lib/api';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/lib/auth-context';
 import { API_BASE_URL } from '@/lib/config';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { generateThumbnail } from '@/lib/utils/thumbnail';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { Video, ResizeMode } from 'expo-av';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // --- CATEGORY STRUCTURE (from web) ---
 const CATEGORIES_STRUCTURE = {
@@ -139,6 +144,9 @@ export default function CreatePostScreen() {
   const insets = useSafeAreaInsets();
   const [loadingCategories, setLoadingCategories] = useState<boolean>(false);
   const [loadingSubcategories, setLoadingSubcategories] = useState<boolean>(false);
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  const videoRef = useRef<Video>(null);
+  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
 
   // --- AUTHENTICATION CHECK ---
   useEffect(() => {
@@ -417,18 +425,32 @@ export default function CreatePostScreen() {
   // --- VALIDATION ---
   const validate = async () => {
     const newErrors: { [k: string]: string } = {};
-    if (!title.trim()) newErrors.title = 'Title is required';
-    else if (title.length < 5) newErrors.title = 'Title must be at least 5 characters';
     if (!caption.trim()) newErrors.caption = 'Caption is required';
-    else if (caption.length < 10) newErrors.caption = 'Caption must be at least 10 characters';
-    if (!selectedGroup) newErrors.group = 'Category group is required';
-    if (!selectedCategoryId) newErrors.category = 'Specific category is required';
+    if (!selectedGroup) newErrors.group = 'Please select a category group';
+    if (!selectedCategoryId) newErrors.category = 'Please select a specific category';
     if (!recordedVideoUri && !editedVideoUri) {
       newErrors.media = 'Please record a video';
     }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  // Toggle camera facing
+  const handleFlipCamera = () => {
+    setCameraFacing(current => current === 'back' ? 'front' : 'back');
+  };
+
+  // Handle video playback
+  const handlePlayPause = async () => {
+    if (videoRef.current) {
+      if (isVideoPlaying) {
+        await videoRef.current.pauseAsync();
+      } else {
+        await videoRef.current.playAsync();
+      }
+      setIsVideoPlaying(!isVideoPlaying);
+    }
   };
 
   // --- SUBMIT ---
@@ -475,7 +497,9 @@ export default function CreatePostScreen() {
       const fileName = videoUri.split('/').pop() || 'video.mp4';
       
       const formData = new FormData();
-      formData.append('title', title);
+      // Use first 50 chars of caption as title, or generate one
+      const autoTitle = caption.trim().substring(0, 50) || 'My Post';
+      formData.append('title', autoTitle);
       formData.append('caption', caption);
       
       const categoryId = getSelectedCategoryId();
@@ -562,13 +586,13 @@ export default function CreatePostScreen() {
               );
               
               // Reset form
-              setTitle('');
               setCaption('');
               setSelectedGroup('');
               setSelectedCategoryId('');
               setRecordedVideoUri(null);
               setEditedVideoUri(null);
               setThumbnailUri(null);
+              setIsVideoPlaying(false);
             } else {
               await uploadNotificationService.showUploadError(response.message || 'Failed to create post', fileName);
               Alert.alert('Error', response.message || 'Failed to create post');
@@ -617,35 +641,62 @@ export default function CreatePostScreen() {
           <CameraView
             ref={cameraRef}
             style={styles.camera}
-            facing="back"
+            facing={cameraFacing}
             mode="video"
           >
             <View style={styles.cameraOverlay}>
-              {/* Top bar with cancel and timer */}
+              {/* Top bar with cancel, timer, and flip */}
               <View style={styles.cameraTopBar}>
                 <TouchableOpacity
                   style={styles.cameraCancelButton}
                   onPress={cancelCamera}
+                  accessibilityLabel="Cancel recording"
+                  accessibilityRole="button"
                 >
                   <MaterialIcons name="close" size={28} color="#fff" />
                 </TouchableOpacity>
-                {isRecording && (
+                
+                {isRecording ? (
                   <View style={styles.recordingIndicator}>
                     <View style={styles.recordingDot} />
                     <Text style={styles.recordingTimer}>
                       {formatDuration(recordingDuration)} / 2:30
                     </Text>
                   </View>
+                ) : (
+                  <View style={styles.cameraHint}>
+                    <Text style={styles.cameraHintText}>Max 2:30</Text>
+                  </View>
                 )}
+
+                <TouchableOpacity
+                  style={styles.cameraFlipButton}
+                  onPress={handleFlipCamera}
+                  disabled={isRecording}
+                  accessibilityLabel="Flip camera"
+                  accessibilityRole="button"
+                >
+                  <MaterialIcons 
+                    name="flip-camera-ios" 
+                    size={28} 
+                    color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
+                  />
+                </TouchableOpacity>
               </View>
 
               {/* Bottom controls */}
               <View style={styles.cameraBottomBar}>
-                <View style={styles.cameraControls}>
+                <View style={styles.cameraControlsRow}>
+                  {/* Placeholder for symmetry */}
+                  <View style={styles.cameraControlPlaceholder} />
+                  
+                  {/* Record/Stop Button */}
                   {!isRecording ? (
                     <TouchableOpacity
                       style={styles.recordButtonLarge}
                       onPress={startRecording}
+                      accessibilityLabel="Start recording"
+                      accessibilityRole="button"
                     >
                       <View style={styles.recordButtonInner} />
                     </TouchableOpacity>
@@ -653,11 +704,20 @@ export default function CreatePostScreen() {
                     <TouchableOpacity
                       style={styles.stopButtonLarge}
                       onPress={stopRecording}
+                      accessibilityLabel="Stop recording"
+                      accessibilityRole="button"
                     >
                       <View style={styles.stopButtonInner} />
                     </TouchableOpacity>
                   )}
+                  
+                  {/* Placeholder for symmetry */}
+                  <View style={styles.cameraControlPlaceholder} />
                 </View>
+                
+                <Text style={styles.cameraInstructionText}>
+                  {isRecording ? 'Tap to stop recording' : 'Tap to start recording'}
+                </Text>
               </View>
             </View>
           </CameraView>
@@ -710,306 +770,327 @@ export default function CreatePostScreen() {
 
       {/* STAGE 2: DETAILS FORM (AFTER VIDEO CONFIRMED) */}
       {currentVideoUri && (
-        <ScrollView
-          style={[styles.scrollView, { backgroundColor: C.background }]}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
+        <KeyboardAvoidingView 
+          style={{ flex: 1 }} 
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
-          {/* Content Authenticity Warning Accordion */}
-          <View
-            style={[
-              styles.warningBox,
-              { backgroundColor: C.card, borderColor: C.warning, marginTop: insets.top + 8 },
-            ]}
+          <ScrollView
+            style={[styles.scrollView, { backgroundColor: C.background }]}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
-            <TouchableOpacity
-              style={styles.accordionHeader}
-              onPress={() => setAccordionOpen(!accordionOpen)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.warningHeader}>
-                <MaterialIcons name="warning" size={24} color={C.warning} />
-                <Text style={[styles.warningTitle, { color: C.warning }]}>Content Authenticity</Text>
-              </View>
-              <MaterialIcons
-                name={accordionOpen ? 'expand-less' : 'expand-more'}
-                size={24}
-                color={C.warning}
-              />
-            </TouchableOpacity>
+            {/* Video Preview Section */}
+            <View style={[styles.videoPreviewSection, { paddingTop: insets.top + 8 }]}>
+              <View style={styles.videoPreviewContainer}>
+                <Video
+                  ref={videoRef}
+                  source={{ uri: currentVideoUri }}
+                  style={styles.videoPlayer}
+                  resizeMode={ResizeMode.COVER}
+                  isLooping
+                  shouldPlay={false}
+                  onPlaybackStatusUpdate={(status) => {
+                    if (status.isLoaded) {
+                      setIsVideoPlaying(status.isPlaying);
+                    }
+                  }}
+                />
+                
+                {/* Play/Pause Overlay */}
+                <TouchableOpacity 
+                  style={styles.videoPlayOverlay}
+                  onPress={handlePlayPause}
+                  activeOpacity={0.8}
+                  accessibilityLabel={isVideoPlaying ? 'Pause video' : 'Play video'}
+                  accessibilityRole="button"
+                >
+                  {!isVideoPlaying && (
+                    <View style={styles.playButtonCircle}>
+                      <MaterialIcons name="play-arrow" size={48} color="#fff" />
+                    </View>
+                  )}
+                </TouchableOpacity>
 
-            {accordionOpen && (
-              <View style={styles.accordionContent}>
-                <Text style={[styles.warningText, { color: C.text }]}>
-                  All content must be 100% authentic and showcase natural talent only.
-                </Text>
-                <Text style={[styles.warningList, { color: C.textSecondary }]}>
-                  • No AI-enhanced or AI-generated content{'\n'}
-                  • No deepfake videos or manipulated media{'\n'}
-                  • No voice changers or audio manipulation{'\n'}
-                  • No filters that alter performance quality
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Form Content – ONLY AFTER VIDEO IS CONFIRMED */}
-          <View style={styles.formContainer}>
-            {/* Video Summary / Controls */}
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: C.text }]}>Your Video</Text>
-              <View
-                style={[
-                  styles.mediaCard,
-                  {
-                    backgroundColor: C.card,
-                    borderColor: errors.media ? C.error : C.border,
-                  },
-                ]}
-              >
-                <View style={styles.mediaPreview}>
-                  <View style={styles.previewContainer}>
-                    {thumbnailUri ? (
-                      <View style={styles.videoThumbnail}>
-                        <MaterialIcons name="play-circle-filled" size={64} color="#fff" />
-                      </View>
-                    ) : (
-                      <View style={[styles.videoThumbnail, { backgroundColor: C.inputBg }]}>
-                        <ActivityIndicator size="large" color={C.primary} />
-                      </View>
-                    )}
-                    <TouchableOpacity
-                      style={[styles.removeButton, { backgroundColor: C.error }]}
-                      onPress={() => {
-                        setRecordedVideoUri(null);
-                        setEditedVideoUri(null);
-                        setThumbnailUri(null);
-                        setTitle('');
-                        setCaption('');
-                        setSelectedGroup('');
-                        setSelectedCategoryId('');
-                      }}
-                    >
-                      <MaterialIcons name="close" size={20} color={C.buttonText} />
-                    </TouchableOpacity>
-                  </View>
-                  <Text style={[styles.mediaFileName, { color: C.textSecondary }]}>
-                    Video ready – you can still edit or re-record if needed.
-                  </Text>
-                  <View style={styles.videoActionButtons}>
-                    <TouchableOpacity
-                      style={[styles.editButton, { backgroundColor: C.primary }]}
-                      onPress={() => handleEditVideo()}
-                      disabled={editing || uploading}
-                    >
-                      {editing ? (
-                        <ActivityIndicator color={C.buttonText} />
-                      ) : (
-                        <>
-                          <MaterialIcons name="edit" size={20} color={C.buttonText} />
-                          <Text style={[styles.editButtonText, { color: C.buttonText }]}>
-                            Open Studio Again
-                          </Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.rerecordButton, { borderColor: C.border }]}
-                      onPress={handleRecordVideo}
-                      disabled={recording || editing || uploading}
-                    >
-                      <MaterialIcons name="refresh" size={20} color={C.text} />
-                      <Text style={[styles.rerecordButtonText, { color: C.text }]}>
-                        Re-record
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                {/* Video Controls */}
+                <View style={styles.videoControlsBar}>
+                  <TouchableOpacity
+                    style={styles.videoControlButton}
+                    onPress={handleRecordVideo}
+                    disabled={uploading}
+                    accessibilityLabel="Re-record video"
+                    accessibilityRole="button"
+                  >
+                    <MaterialIcons name="videocam" size={20} color="#fff" />
+                    <Text style={styles.videoControlText}>Re-record</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.videoControlButton, styles.discardButton]}
+                    onPress={() => {
+                      setRecordedVideoUri(null);
+                      setEditedVideoUri(null);
+                      setThumbnailUri(null);
+                      setCaption('');
+                      setSelectedGroup('');
+                      setSelectedCategoryId('');
+                      setIsVideoPlaying(false);
+                    }}
+                    disabled={uploading}
+                    accessibilityLabel="Discard video"
+                    accessibilityRole="button"
+                  >
+                    <MaterialIcons name="delete-outline" size={20} color="#ef4444" />
+                    <Text style={[styles.videoControlText, { color: '#ef4444' }]}>Discard</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
-              {errors.media && <Text style={[styles.errorText, { color: C.error }]}>{errors.media}</Text>}
+              {errors.media && <Text style={[styles.errorText, { color: C.error, textAlign: 'center', marginTop: 8 }]}>{errors.media}</Text>}
             </View>
 
-            {/* Caption */}
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: C.text }]}>Caption</Text>
-              <TextInput
-                style={[
-                  styles.textarea,
-                  {
-                    color: C.inputText,
-                    backgroundColor: C.inputBg,
-                    borderColor: errors.caption ? C.error : C.inputBorder,
-                  },
-                ]}
-                placeholder="Describe your post and what makes it special..."
-                placeholderTextColor={C.textSecondary}
-                value={caption}
-                onChangeText={setCaption}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
-              {errors.caption && (
-                <Text style={[styles.errorText, { color: C.error }]}>{errors.caption}</Text>
-              )}
-            </View>
-
-            {/* Category Group */}
-            <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: C.text }]}>Category Group</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.pillRow}
-              >
-                {loadingCategories ? (
-                  [1, 2, 3, 4, 5, 6].map((i) => (
-                    <View
-                      key={`cat-skel-${i}`}
-                      style={[
-                        styles.pillSkeleton,
-                        { backgroundColor: C.inputBg, borderColor: C.inputBorder },
-                      ]}
-                    />
-                  ))
-                ) : (
-                  (mainCategories.length ? mainCategories.map((c) => c.name) : MAIN_CATEGORY_GROUPS).map(
-                    (group) => (
-                      <TouchableOpacity
-                        key={group}
-                        style={[
-                          styles.pill,
-                          selectedGroup === group && {
-                            backgroundColor: C.primary,
-                            borderColor: C.primary,
-                          },
-                        ]}
-                        onPress={() => {
-                          setSelectedGroup(group);
-                          setSelectedCategoryId('');
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.pillText,
-                            { color: selectedGroup === group ? C.buttonText : C.text },
-                          ]}
-                        >
-                          {group}
-                        </Text>
-                      </TouchableOpacity>
-                    )
-                  )
-                )}
-              </ScrollView>
-              {errors.group && (
-                <Text style={[styles.errorText, { color: C.error }]}>{errors.group}</Text>
-              )}
-            </View>
-
-            {/* Specific Category */}
-            {selectedGroup && (
+            {/* Form Content */}
+            <View style={styles.formContainer}>
+              {/* Caption Input */}
               <View style={styles.inputGroup}>
-                <Text style={[styles.label, { color: C.text }]}>Specific Category</Text>
+                <View style={styles.labelRow}>
+                  <Text style={[styles.label, { color: C.text }]}>Caption ✨</Text>
+                  <Text style={[styles.labelHint, { color: C.textSecondary }]}>
+                    Add emojis and hashtags!
+                  </Text>
+                </View>
+                <View style={[
+                  styles.captionInputContainer,
+                  { 
+                    backgroundColor: C.inputBg, 
+                    borderColor: errors.caption ? C.error : C.inputBorder 
+                  }
+                ]}>
+                  <TextInput
+                    style={[styles.captionInput, { color: C.inputText }]}
+                    placeholder="Share your story... 🎬 What makes this special? Add #hashtags"
+                    placeholderTextColor={C.placeholder}
+                    value={caption}
+                    onChangeText={setCaption}
+                    multiline
+                    scrollEnabled
+                    textAlignVertical="top"
+                    autoCapitalize="sentences"
+                    autoCorrect
+                    returnKeyType="default"
+                    blurOnSubmit={false}
+                  />
+                  {caption.length > 0 && (
+                    <View style={styles.captionFooter}>
+                      <Text style={[styles.charCount, { color: C.textSecondary }]}>
+                        {caption.length} characters
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                {errors.caption && (
+                  <Text style={[styles.errorText, { color: C.error }]}>{errors.caption}</Text>
+                )}
+              </View>
+
+              {/* Category Selection */}
+              <View style={styles.inputGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={[styles.label, { color: C.text }]}>Category 🏷️</Text>
+                  {selectedGroup && selectedCategoryId && (
+                    <View style={[styles.selectedBadge, { backgroundColor: C.primary + '20' }]}>
+                      <Text style={[styles.selectedBadgeText, { color: C.primary }]}>
+                        {getSelectedCategoryName()}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                
+                {/* Category Groups */}
+                <Text style={[styles.subLabel, { color: C.textSecondary }]}>Select a group</Text>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.pillRow}
                 >
-                  {loadingSubcategories ? (
-                    [1, 2, 3, 4].map((i) => (
+                  {loadingCategories ? (
+                    [1, 2, 3, 4, 5].map((i) => (
                       <View
-                        key={`subcat-skel-${i}`}
-                        style={[
-                          styles.pillSkeleton,
-                          { backgroundColor: C.inputBg, borderColor: C.inputBorder },
-                        ]}
+                        key={`cat-skel-${i}`}
+                        style={[styles.pillSkeleton, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]}
                       />
                     ))
                   ) : (
-                    (subcategories.length ? subcategories : getCategoriesForGroup()).map(
-                      (cat: { id: number; name: string }) => (
+                    (mainCategories.length ? mainCategories.map((c) => c.name) : MAIN_CATEGORY_GROUPS).map(
+                      (group) => (
                         <TouchableOpacity
-                          key={cat.id}
+                          key={group}
                           style={[
-                            styles.pill,
-                            selectedCategoryId === String(cat.id) && {
+                            styles.categoryPill,
+                            { borderColor: C.border },
+                            selectedGroup === group && {
                               backgroundColor: C.primary,
                               borderColor: C.primary,
                             },
                           ]}
-                          onPress={() => setSelectedCategoryId(String(cat.id))}
+                          onPress={() => {
+                            setSelectedGroup(group);
+                            setSelectedCategoryId('');
+                          }}
+                          accessibilityLabel={`Select ${group} category`}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: selectedGroup === group }}
                         >
                           <Text
                             style={[
-                              styles.pillText,
-                              {
-                                color:
-                                  selectedCategoryId === String(cat.id) ? C.buttonText : C.text,
-                              },
+                              styles.categoryPillText,
+                              { color: selectedGroup === group ? '#fff' : C.text },
                             ]}
                           >
-                            {cat.name}
+                            {group}
                           </Text>
                         </TouchableOpacity>
                       )
                     )
                   )}
                 </ScrollView>
-                {errors.category && (
-                  <Text style={[styles.errorText, { color: C.error }]}>{errors.category}</Text>
+                {errors.group && (
+                  <Text style={[styles.errorText, { color: C.error }]}>{errors.group}</Text>
+                )}
+
+                {/* Subcategories */}
+                {selectedGroup && (
+                  <View style={styles.subcategorySection}>
+                    <Text style={[styles.subLabel, { color: C.textSecondary }]}>
+                      Select a specific category
+                    </Text>
+                    <View style={styles.subcategoryGrid}>
+                      {loadingSubcategories ? (
+                        [1, 2, 3, 4, 5, 6].map((i) => (
+                          <View
+                            key={`subcat-skel-${i}`}
+                            style={[styles.subcategoryPillSkeleton, { backgroundColor: C.inputBg }]}
+                          />
+                        ))
+                      ) : (
+                        (subcategories.length ? subcategories : getCategoriesForGroup()).map(
+                          (cat: { id: number; name: string }) => (
+                            <TouchableOpacity
+                              key={cat.id}
+                              style={[
+                                styles.subcategoryPill,
+                                { backgroundColor: C.card, borderColor: C.border },
+                                selectedCategoryId === String(cat.id) && {
+                                  backgroundColor: C.primary + '20',
+                                  borderColor: C.primary,
+                                },
+                              ]}
+                              onPress={() => setSelectedCategoryId(String(cat.id))}
+                              accessibilityLabel={`Select ${cat.name}`}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected: selectedCategoryId === String(cat.id) }}
+                            >
+                              {selectedCategoryId === String(cat.id) && (
+                                <MaterialIcons name="check-circle" size={16} color={C.primary} style={{ marginRight: 4 }} />
+                              )}
+                              <Text
+                                style={[
+                                  styles.subcategoryPillText,
+                                  { color: selectedCategoryId === String(cat.id) ? C.primary : C.text },
+                                ]}
+                              >
+                                {cat.name}
+                              </Text>
+                            </TouchableOpacity>
+                          )
+                        )
+                      )}
+                    </View>
+                    {errors.category && (
+                      <Text style={[styles.errorText, { color: C.error }]}>{errors.category}</Text>
+                    )}
+                  </View>
                 )}
               </View>
-            )}
 
-            {/* Upload Progress Indicator */}
-            {uploading && (
-              <View
-                style={[
-                  styles.uploadProgressContainer,
-                  { backgroundColor: C.card, borderColor: C.border },
-                ]}
+              {/* Content Warning */}
+              <TouchableOpacity
+                style={[styles.warningBanner, { backgroundColor: C.warningBg, borderColor: C.warningBorder }]}
+                onPress={() => setAccordionOpen(!accordionOpen)}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Content authenticity guidelines"
               >
-                <View style={styles.uploadProgressBarContainer}>
-                  <View
-                    style={[
-                      styles.uploadProgressBar,
-                      {
-                        width: `${Math.min(Math.max(uploadProgress, 0), 100)}%`,
-                        backgroundColor: C.primary,
-                      },
-                    ]}
+                <View style={styles.warningBannerHeader}>
+                  <MaterialIcons name="verified" size={20} color={C.warning} />
+                  <Text style={[styles.warningBannerTitle, { color: C.warning }]}>
+                    Authenticity Required
+                  </Text>
+                  <MaterialIcons 
+                    name={accordionOpen ? 'expand-less' : 'expand-more'} 
+                    size={20} 
+                    color={C.warning} 
                   />
                 </View>
-                <Text style={[styles.uploadProgressText, { color: C.text }]}>
-                  Uploading... {Math.min(Math.round(uploadProgress), 100)}%
-                </Text>
-              </View>
-            )}
-
-            {/* Submit Button */}
-            <TouchableOpacity
-              style={[
-                styles.createButton,
-                { backgroundColor: C.primary },
-                uploading && styles.createButtonDisabled,
-              ]}
-              onPress={handleCreatePost}
-              disabled={uploading || !currentVideoUri}
-            >
-              {uploading ? (
-                <ActivityIndicator color={C.buttonText} />
-              ) : (
-                <>
-                  <MaterialIcons name="send" size={20} color={C.buttonText} />
-                  <Text style={[styles.createButtonText, { color: C.buttonText }]}>
-                    Publish Post
+                {accordionOpen && (
+                  <Text style={[styles.warningBannerText, { color: C.text }]}>
+                    ✓ 100% authentic content only{'\n'}
+                    ✗ No AI, deepfakes, or manipulated media{'\n'}
+                    ✗ No voice changers or filters that alter quality
                   </Text>
-                </>
+                )}
+              </TouchableOpacity>
+
+              {/* Upload Progress */}
+              {uploading && (
+                <View style={[styles.uploadProgressCard, { backgroundColor: C.card, borderColor: C.primary }]}>
+                  <View style={styles.uploadProgressHeader}>
+                    <ActivityIndicator size="small" color={C.primary} />
+                    <Text style={[styles.uploadProgressTitle, { color: C.text }]}>
+                      Uploading your talent...
+                    </Text>
+                  </View>
+                  <View style={styles.uploadProgressBarContainer}>
+                    <View
+                      style={[
+                        styles.uploadProgressBar,
+                        { width: `${Math.min(Math.max(uploadProgress, 0), 100)}%`, backgroundColor: C.primary },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.uploadProgressPercent, { color: C.primary }]}>
+                    {Math.min(Math.round(uploadProgress), 100)}%
+                  </Text>
+                </View>
               )}
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
+
+              {/* Submit Button */}
+              <TouchableOpacity
+                style={[
+                  styles.publishButton,
+                  { backgroundColor: C.primary },
+                  (uploading || !caption.trim() || !selectedCategoryId) && styles.publishButtonDisabled,
+                ]}
+                onPress={handleCreatePost}
+                disabled={uploading || !currentVideoUri || !caption.trim() || !selectedCategoryId}
+                accessibilityLabel="Publish post"
+                accessibilityRole="button"
+              >
+                {uploading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <MaterialIcons name="rocket-launch" size={24} color="#fff" />
+                    <Text style={styles.publishButtonText}>Publish Post</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* Bottom spacing */}
+              <View style={{ height: insets.bottom + 20 }} />
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       )}
     </View>
   );
@@ -1378,5 +1459,243 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 4,
     backgroundColor: '#fff',
+  },
+  // Camera improvements
+  cameraFlipButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cameraHint: {
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  cameraHintText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  cameraControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 40,
+  },
+  cameraControlPlaceholder: {
+    width: 50,
+    height: 50,
+  },
+  cameraInstructionText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  // Video Preview
+  videoPreviewSection: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  videoPreviewContainer: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  videoPlayer: {
+    width: '100%',
+    height: SCREEN_WIDTH * 0.75,
+    backgroundColor: '#000',
+  },
+  videoPlayOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playButtonCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoControlsBar: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+  },
+  videoControlButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  discardButton: {
+    backgroundColor: 'rgba(239,68,68,0.15)',
+  },
+  videoControlText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  // Caption Input
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  labelHint: {
+    fontSize: 12,
+  },
+  captionInputContainer: {
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  captionInput: {
+    minHeight: 120,
+    maxHeight: 200,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 16,
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  captionFooter: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    alignItems: 'flex-end',
+  },
+  charCount: {
+    fontSize: 12,
+  },
+  // Category Selection
+  subLabel: {
+    fontSize: 13,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  selectedBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  selectedBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  categoryPill: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    marginRight: 10,
+  },
+  categoryPillText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  subcategorySection: {
+    marginTop: 16,
+  },
+  subcategoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  subcategoryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  subcategoryPillSkeleton: {
+    width: 100,
+    height: 40,
+    borderRadius: 12,
+  },
+  subcategoryPillText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  // Warning Banner
+  warningBanner: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 20,
+  },
+  warningBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  warningBannerTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  warningBannerText: {
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 10,
+  },
+  // Upload Progress
+  uploadProgressCard: {
+    borderRadius: 16,
+    borderWidth: 2,
+    padding: 16,
+    marginBottom: 20,
+  },
+  uploadProgressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  uploadProgressTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  uploadProgressPercent: {
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  // Publish Button
+  publishButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 18,
+    borderRadius: 16,
+    gap: 10,
+  },
+  publishButtonDisabled: {
+    opacity: 0.5,
+  },
+  publishButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
   },
 });
