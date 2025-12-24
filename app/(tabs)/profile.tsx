@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,20 +14,180 @@ import {
   RefreshControl,
   Dimensions,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { userApi, postsApi, likesApi } from '@/lib/api';
 import { Post } from '@/types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { Video, ResizeMode } from 'expo-av';
+import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditProfileModal } from '@/components/EditProfileModal';
 import DotsSpinner from '@/components/DotsSpinner';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const { width: screenWidth } = Dimensions.get('window');
+const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
+
+// Default avatar component
+const DefaultAvatar = ({ size = 100, name = '' }: { size?: number; name?: string }) => {
+  const initials = name
+    ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    : '?';
+  
+  return (
+    <LinearGradient
+      colors={['#3b82f6', '#8b5cf6']}
+      style={[styles.defaultAvatar, { width: size, height: size, borderRadius: size / 2 }]}
+    >
+      <Text style={[styles.defaultAvatarText, { fontSize: size * 0.4 }]}>{initials}</Text>
+    </LinearGradient>
+  );
+};
+
+// Video thumbnail component with teaser playback
+interface VideoThumbnailProps {
+  post: Post;
+  isActive: boolean;
+  onPress: () => void;
+}
+
+const VideoThumbnail = ({ post, isActive, onPress }: VideoThumbnailProps) => {
+  const videoRef = useRef<Video>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [showVideo, setShowVideo] = useState(false);
+  
+  const thumbnailUrl = post.image || (post as any).thumbnail || '';
+  const videoUrl = post.video_url || '';
+  const isVideo = !!videoUrl;
+  const previewUrl = isVideo ? (thumbnailUrl || videoUrl) : (post.image || '');
+
+  useEffect(() => {
+    if (isActive && isVideo && videoUrl) {
+      // Small delay before showing video to ensure smooth transition
+      const timer = setTimeout(() => {
+        setShowVideo(true);
+      }, 200);
+      return () => clearTimeout(timer);
+    } else {
+      setShowVideo(false);
+      setIsLoaded(false);
+    }
+  }, [isActive, isVideo, videoUrl]);
+
+  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
+    if (status.isLoaded) {
+      setIsLoaded(true);
+      // Loop the teaser after 3 seconds
+      if (status.positionMillis && status.positionMillis > 3000) {
+        videoRef.current?.setPositionAsync(0);
+      }
+    }
+  };
+
+  return (
+    <TouchableOpacity 
+      style={styles.postItem}
+      onPress={onPress}
+      activeOpacity={0.9}
+    >
+      {/* Base thumbnail image */}
+      {previewUrl ? (
+        <Image 
+          source={{ uri: previewUrl }} 
+          style={styles.postMedia}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
+          <MaterialIcons name="video-library" size={28} color="#444" />
+        </View>
+      )}
+
+      {/* Video teaser overlay */}
+      {showVideo && isVideo && videoUrl && (
+        <Video
+          ref={videoRef}
+          source={{ uri: videoUrl }}
+          style={[styles.postMedia, styles.teaserVideo]}
+          resizeMode={ResizeMode.COVER}
+          shouldPlay={isActive}
+          isLooping={false}
+          isMuted={true}
+          volume={0}
+          onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+        />
+      )}
+      
+      {/* Overlay with stats */}
+      <View style={styles.postOverlay}>
+        <View style={styles.postStats}>
+          <Feather name="heart" size={12} color="#fff" />
+          <Text style={styles.postStatText}>{formatNumber(post.likes || 0)}</Text>
+        </View>
+        
+        {/* Status indicator */}
+        <View style={[
+          styles.statusIndicator,
+          { backgroundColor: getStatusColor(post.status || 'approved') }
+        ]}>
+          <MaterialIcons 
+            name={getStatusIcon(post.status || 'approved') as any} 
+            size={10} 
+            color="#fff" 
+          />
+        </View>
+      </View>
+      
+      {/* Video play indicator / Active indicator */}
+      {isVideo && (
+        <View style={[
+          styles.videoPlayIndicator,
+          isActive && styles.videoPlayIndicatorActive
+        ]}>
+          {isActive ? (
+            <View style={styles.playingDot} />
+          ) : (
+            <Feather name="play" size={14} color="#fff" />
+          )}
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+};
+
+// Helper functions moved outside component for use in VideoThumbnail
+const formatNumber = (num: number): string => {
+  if (num >= 1000000) {
+    return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  }
+  if (num >= 1000) {
+    return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+  }
+  return num.toString();
+};
+
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case 'approved': return '#10b981';
+    case 'pending': return '#f59e0b';
+    case 'rejected': return '#ef4444';
+    case 'reported': return '#8b5cf6';
+    default: return '#10b981';
+  }
+};
+
+const getStatusIcon = (status: string) => {
+  switch (status) {
+    case 'approved': return 'check-circle';
+    case 'pending': return 'schedule';
+    case 'rejected': return 'cancel';
+    case 'reported': return 'report';
+    default: return 'check-circle';
+  }
+};
 
 const PROFILE_TABS = [
   { key: 'approved', label: 'Approved', icon: 'check-circle' },
@@ -66,7 +226,58 @@ export default function ProfileScreen() {
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [likingPostId, setLikingPostId] = useState<string | null>(null);
   
+  // Video teaser playback state
+  const [activeTeaserIndex, setActiveTeaserIndex] = useState(0);
+  const [isScreenFocused, setIsScreenFocused] = useState(true);
+  const teaserIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
   const insets = useSafeAreaInsets();
+
+  // Cycle through video teasers - one at a time
+  useEffect(() => {
+    if (isScreenFocused && posts.length > 0) {
+      // Find video posts only
+      const videoPosts = posts.filter(p => !!p.video_url);
+      
+      if (videoPosts.length > 0) {
+        // Clear any existing interval
+        if (teaserIntervalRef.current) {
+          clearInterval(teaserIntervalRef.current);
+        }
+        
+        // Cycle through video posts every 4 seconds
+        teaserIntervalRef.current = setInterval(() => {
+          setActiveTeaserIndex(prev => {
+            const videoIndices = posts
+              .map((p, i) => p.video_url ? i : -1)
+              .filter(i => i !== -1);
+            
+            if (videoIndices.length === 0) return 0;
+            
+            const currentVideoPosition = videoIndices.indexOf(prev);
+            const nextPosition = (currentVideoPosition + 1) % videoIndices.length;
+            return videoIndices[nextPosition] ?? 0;
+          });
+        }, 4000);
+      }
+    }
+    
+    return () => {
+      if (teaserIntervalRef.current) {
+        clearInterval(teaserIntervalRef.current);
+      }
+    };
+  }, [isScreenFocused, posts]);
+
+  // Handle screen focus for video playback
+  useFocusEffect(
+    useCallback(() => {
+      setIsScreenFocused(true);
+      return () => {
+        setIsScreenFocused(false);
+      };
+    }, [])
+  );
 
   useEffect(() => {
     if (!user) {
@@ -391,16 +602,13 @@ export default function ProfileScreen() {
     );
   };
 
-  const renderPost = ({ item }: { item: Post }) => {
-    // For videos, use the image/thumbnail field as preview, fallback to video_url
-    const thumbnailUrl = item.image || (item as any).thumbnail || '';
-    const videoUrl = item.video_url || '';
-    const isVideo = !!videoUrl;
-    const previewUrl = isVideo ? (thumbnailUrl || videoUrl) : (item.image || '');
-
+  const renderPost = ({ item, index }: { item: Post; index: number }) => {
+    const isActiveTeaser = isScreenFocused && activeTeaserIndex === index;
+    
     return (
-      <TouchableOpacity 
-        style={styles.postItem}
+      <VideoThumbnail
+        post={item}
+        isActive={isActiveTeaser}
         onPress={() => {
           // Navigate to full-screen profile feed with current post as initial
           router.push({
@@ -412,77 +620,8 @@ export default function ProfileScreen() {
             }
           });
         }}
-        activeOpacity={0.8}
-      >
-        {previewUrl ? (
-          <Image 
-            source={{ uri: previewUrl }} 
-            style={styles.postMedia}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.postMedia, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
-            <MaterialIcons name="broken-image" size={32} color="#666" />
-          </View>
-        )}
-        
-        <View style={styles.postOverlay}>
-          <View style={styles.postStats}>
-            <Feather name="heart" size={12} color="#fff" />
-            <Text style={styles.postStatText}>{formatNumber(item.likes || 0)}</Text>
-          </View>
-          
-          {/* Status indicator */}
-          <View style={[
-            styles.statusIndicator,
-            { backgroundColor: getStatusColor(item.status || 'approved') }
-          ]}>
-            <MaterialIcons 
-              name={getStatusIcon(item.status || 'approved')} 
-              size={10} 
-              color="#fff" 
-            />
-          </View>
-        </View>
-        
-        {/* Video play indicator */}
-        {isVideo && (
-          <View style={styles.videoPlayIndicator}>
-            <Feather name="play" size={16} color="#fff" />
-          </View>
-        )}
-      </TouchableOpacity>
+      />
     );
-  };
-  
-  const formatNumber = (num: number): string => {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
-    }
-    if (num >= 1000) {
-      return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
-    }
-    return num.toString();
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'approved': return '#10b981';
-      case 'pending': return '#f59e0b';
-      case 'rejected': return '#ef4444';
-      case 'reported': return '#8b5cf6';
-      default: return '#10b981';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'approved': return 'check-circle';
-      case 'pending': return 'schedule';
-      case 'rejected': return 'cancel';
-      case 'reported': return 'report';
-      default: return 'check-circle';
-    }
   };
 
   if (loading) {
@@ -527,10 +666,14 @@ export default function ProfileScreen() {
       >
         {/* Profile Info */}
         <View style={styles.profileSection}>
-          <Image
-            source={{ uri: profile.profile_picture || 'https://via.placeholder.com/100' }}
-            style={styles.avatar}
-          />
+          {profile.profile_picture ? (
+            <Image
+              source={{ uri: profile.profile_picture }}
+              style={styles.avatar}
+            />
+          ) : (
+            <DefaultAvatar size={100} name={profile.username || profile.name || ''} />
+          )}
           <Text style={styles.username}>@{profile.username}</Text>
           {profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
           
@@ -980,6 +1123,37 @@ const styles = StyleSheet.create({
     padding: 4,
     alignItems: 'center',
     justifyContent: 'center',
+    minWidth: 24,
+    minHeight: 24,
+  },
+  videoPlayIndicatorActive: {
+    backgroundColor: '#ef4444',
+  },
+  playingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
+  },
+  teaserVideo: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  noMediaPlaceholder: {
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  defaultAvatar: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  defaultAvatarText: {
+    color: '#fff',
+    fontWeight: '700',
   },
   emptyContainer: {
     alignItems: 'center',
