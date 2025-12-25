@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,21 +10,20 @@ import {
   TextInput,
   Modal,
   Alert,
-  KeyboardAvoidingView,
   Platform,
   Animated,
   Dimensions,
   Keyboard,
-  TouchableWithoutFeedback,
+  Pressable,
 } from 'react-native';
-import { MaterialIcons, Feather } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { postsApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
-const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
-const MODAL_HEIGHT = SCREEN_HEIGHT * 0.75;
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const MODAL_HEIGHT = SCREEN_HEIGHT * 0.7;
 
 interface Comment {
   id?: string;
@@ -56,6 +55,7 @@ interface CommentsModalProps {
   postId: string;
   postTitle?: string;
   postAuthor?: string;
+  onCommentAdded?: () => void;
 }
 
 const formatTimeAgo = (dateString: string): string => {
@@ -75,7 +75,8 @@ export default function CommentsModal({
   onClose, 
   postId, 
   postTitle, 
-  postAuthor 
+  postAuthor,
+  onCommentAdded,
 }: CommentsModalProps) {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
@@ -88,24 +89,49 @@ export default function CommentsModal({
   const [commentText, setCommentText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [inputFocused, setInputFocused] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
+  const isMounted = useRef(true);
+  
+  // Animation values
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const keyboardAnim = useRef(new Animated.Value(0)).current;
 
-  // Keyboard listeners with height tracking
+  // Track mount status
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  // Keyboard listeners - animate the bottom position
   useEffect(() => {
     const keyboardWillShow = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
-        setKeyboardHeight(e.endCoordinates.height);
+        if (isMounted.current) {
+          setKeyboardHeight(e.endCoordinates.height);
+          Animated.timing(keyboardAnim, {
+            toValue: e.endCoordinates.height,
+            duration: Platform.OS === 'ios' ? e.duration : 200,
+            useNativeDriver: false,
+          }).start();
+        }
       }
     );
     const keyboardWillHide = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => {
-        setKeyboardHeight(0);
+      (e) => {
+        if (isMounted.current) {
+          setKeyboardHeight(0);
+          Animated.timing(keyboardAnim, {
+            toValue: 0,
+            duration: Platform.OS === 'ios' ? (e?.duration || 200) : 200,
+            useNativeDriver: false,
+          }).start();
+        }
       }
     );
 
@@ -115,9 +141,15 @@ export default function CommentsModal({
     };
   }, []);
 
+  // Handle visibility changes
   useEffect(() => {
+    if (!isMounted.current) return;
+
     if (visible && postId) {
-      // Animate in
+      slideAnim.setValue(SCREEN_HEIGHT);
+      fadeAnim.setValue(0);
+      keyboardAnim.setValue(0);
+      
       Animated.parallel([
         Animated.spring(slideAnim, {
           toValue: 0,
@@ -136,33 +168,31 @@ export default function CommentsModal({
       setHasMore(true);
       setError(null);
       fetchComments(1, true);
-    } else {
-      // Animate out
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: SCREEN_HEIGHT,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-      
-      // Reset state
-      setComments([]);
-      setCurrentPage(1);
-      setHasMore(true);
-      setError(null);
-      setCommentText('');
-      setKeyboardHeight(0);
     }
   }, [visible, postId]);
 
-  const handleClose = () => {
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!visible) {
+      const timer = setTimeout(() => {
+        if (isMounted.current) {
+          setComments([]);
+          setCurrentPage(1);
+          setHasMore(true);
+          setError(null);
+          setCommentText('');
+          setKeyboardHeight(0);
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [visible]);
+
+  const handleClose = useCallback(() => {
+    if (!isMounted.current) return;
+    
     Keyboard.dismiss();
+    
     Animated.parallel([
       Animated.timing(slideAnim, {
         toValue: SCREEN_HEIGHT,
@@ -175,12 +205,14 @@ export default function CommentsModal({
         useNativeDriver: true,
       }),
     ]).start(() => {
-      onClose();
+      if (isMounted.current) {
+        onClose();
+      }
     });
-  };
+  }, [onClose, slideAnim, fadeAnim]);
 
   const fetchComments = async (page = 1, isInitial = false) => {
-    if (!postId) return;
+    if (!postId || !isMounted.current) return;
     
     try {
       if (isInitial) {
@@ -191,6 +223,8 @@ export default function CommentsModal({
       setError(null);
       
       const response = await postsApi.getComments(postId, page, 20);
+      
+      if (!isMounted.current) return;
       
       if (response.status === 'success' && response.data?.comments) {
         const newComments = Array.isArray(response.data.comments) ? response.data.comments : [];
@@ -208,13 +242,16 @@ export default function CommentsModal({
         setHasMore(false);
       }
     } catch (error: any) {
+      if (!isMounted.current) return;
       console.error('Error fetching comments:', error);
       setError('Failed to load comments');
       if (page === 1) setComments([]);
       setHasMore(false);
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (isMounted.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   };
 
@@ -250,6 +287,8 @@ export default function CommentsModal({
       
       const response = await postsApi.addComment(postId, commentContent);
       
+      if (!isMounted.current) return;
+      
       if (response.status === 'success') {
         let newComment = null;
         if (response.data?.comment) {
@@ -276,14 +315,18 @@ export default function CommentsModal({
           
           setComments(prev => [newComment, ...prev]);
           setCommentText('');
-          Keyboard.dismiss();
+          
+          onCommentAdded?.();
           
           setTimeout(() => {
-            flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+            if (isMounted.current) {
+              flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+            }
           }, 100);
         } else {
           await fetchComments(1, true);
           setCommentText('');
+          onCommentAdded?.();
         }
       } else {
         Alert.alert('Error', response.message || 'Failed to submit comment');
@@ -292,7 +335,9 @@ export default function CommentsModal({
       console.error('Error submitting comment:', error);
       Alert.alert('Error', 'Failed to submit comment');
     } finally {
-      setSubmitting(false);
+      if (isMounted.current) {
+        setSubmitting(false);
+      }
     }
   };
 
@@ -313,7 +358,7 @@ export default function CommentsModal({
     }, 300);
   };
 
-  const renderComment = ({ item, index }: { item: Comment; index: number }) => {
+  const renderComment = ({ item }: { item: Comment }) => {
     const commentUser = item.user || item.User || {};
     const commentContent = item.content || item.comment_text || '';
     const commentDate = item.createdAt || item.created_at || item.comment_date || '';
@@ -345,7 +390,6 @@ export default function CommentsModal({
             <Text style={styles.commentText}>{commentContent}</Text>
           </View>
           
-          {/* Comment actions */}
           <View style={styles.commentActions}>
             <TouchableOpacity style={styles.commentActionButton} activeOpacity={0.6}>
               <Feather name="heart" size={14} color="#8e8e93" />
@@ -365,12 +409,11 @@ export default function CommentsModal({
     return null;
   }
 
-  // Calculate modal position based on keyboard
-  const modalTransform = {
-    transform: [
-      { translateY: slideAnim },
-    ],
-  };
+  // Calculate dynamic modal height when keyboard is visible
+  const isKeyboardVisible = keyboardHeight > 0;
+  const availableHeight = isKeyboardVisible 
+    ? SCREEN_HEIGHT - keyboardHeight - insets.top - 20
+    : MODAL_HEIGHT;
 
   return (
     <Modal
@@ -380,214 +423,218 @@ export default function CommentsModal({
       onRequestClose={handleClose}
       statusBarTranslucent
     >
-      {/* Backdrop */}
-      <TouchableWithoutFeedback onPress={handleClose}>
-        <Animated.View style={[styles.backdrop, { opacity: fadeAnim }]} />
-      </TouchableWithoutFeedback>
-      
-      {/* Main Modal Content */}
-      <KeyboardAvoidingView 
-        style={styles.keyboardAvoidingView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-      >
+      <View style={styles.modalOverlay}>
+        {/* Backdrop */}
+        <Pressable style={styles.backdrop} onPress={handleClose}>
+          <Animated.View 
+            style={[
+              StyleSheet.absoluteFill, 
+              { opacity: fadeAnim, backgroundColor: 'rgba(0, 0, 0, 0.6)' }
+            ]} 
+          />
+        </Pressable>
+        
+        {/* Modal Container - positioned at bottom with keyboard offset */}
         <Animated.View
           style={[
-            styles.modalContainer,
-            modalTransform,
+            styles.modalWrapper,
             {
-              maxHeight: MODAL_HEIGHT,
-              marginBottom: Platform.OS === 'android' ? keyboardHeight : 0,
+              bottom: keyboardAnim,
             },
           ]}
         >
-          {/* Handle Bar */}
-          <View style={styles.handleContainer}>
-            <View style={styles.handle} />
-          </View>
-
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <Text style={styles.headerTitle}>Comments</Text>
-              {comments.length > 0 && (
-                <View style={styles.commentCountBadge}>
-                  <Text style={styles.commentCountText}>{comments.length}</Text>
-                </View>
-              )}
-            </View>
-            <TouchableOpacity 
-              onPress={handleClose} 
-              style={styles.closeButton}
-              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
-            >
-              <View style={styles.closeButtonInner}>
-                <Feather name="x" size={18} color="#fff" />
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          {/* Divider */}
-          <View style={styles.divider} />
-
-          {/* Comments List */}
-          <FlatList
-            ref={flatListRef}
-            data={comments}
-            renderItem={renderComment}
-            keyExtractor={(item, index) => 
-              item.comment_id?.toString() || 
-              item.id?.toString() || 
-              `comment-${index}`
-            }
-            style={styles.commentsList}
-            contentContainerStyle={[
-              styles.commentsContent,
-              comments.length === 0 && styles.commentsContentEmpty
+          <Animated.View
+            style={[
+              styles.modalContainer,
+              {
+                transform: [{ translateY: slideAnim }],
+                maxHeight: availableHeight,
+              },
             ]}
-            showsVerticalScrollIndicator={false}
-            onEndReached={loadMoreComments}
-            onEndReachedThreshold={0.5}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
-            ListEmptyComponent={
-              loading ? (
-                <View style={styles.centerContainer}>
-                  <View style={styles.loadingSpinner}>
-                    <ActivityIndicator size="large" color="#3b82f6" />
+          >
+            {/* Handle Bar */}
+            <View style={styles.handleContainer}>
+              <View style={styles.handle} />
+            </View>
+
+            {/* Header */}
+            <View style={styles.header}>
+              <View style={styles.headerLeft}>
+                <Text style={styles.headerTitle}>Comments</Text>
+                {comments.length > 0 && (
+                  <View style={styles.commentCountBadge}>
+                    <Text style={styles.commentCountText}>{comments.length}</Text>
                   </View>
-                  <Text style={styles.loadingText}>Loading comments...</Text>
+                )}
+              </View>
+              <TouchableOpacity 
+                onPress={handleClose} 
+                style={styles.closeButton}
+                hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+              >
+                <View style={styles.closeButtonInner}>
+                  <Feather name="x" size={18} color="#fff" />
                 </View>
-              ) : error ? (
-                <View style={styles.centerContainer}>
-                  <View style={styles.errorIcon}>
-                    <Feather name="wifi-off" size={28} color="#ef4444" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.divider} />
+
+            {/* Comments List - takes available space */}
+            <FlatList
+              ref={flatListRef}
+              data={comments}
+              renderItem={renderComment}
+              keyExtractor={(item, index) => 
+                item.comment_id?.toString() || 
+                item.id?.toString() || 
+                `comment-${index}`
+              }
+              style={styles.commentsList}
+              contentContainerStyle={[
+                styles.commentsContent,
+                comments.length === 0 && styles.commentsContentEmpty
+              ]}
+              showsVerticalScrollIndicator={false}
+              onEndReached={loadMoreComments}
+              onEndReachedThreshold={0.5}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              ListEmptyComponent={
+                loading ? (
+                  <View style={styles.centerContainer}>
+                    <View style={styles.loadingSpinner}>
+                      <ActivityIndicator size="large" color="#3b82f6" />
+                    </View>
+                    <Text style={styles.loadingText}>Loading comments...</Text>
                   </View>
-                  <Text style={styles.errorTitle}>Couldn't load comments</Text>
-                  <Text style={styles.errorSubtext}>{error}</Text>
-                  <TouchableOpacity 
-                    style={styles.retryButton}
-                    onPress={() => fetchComments(1, true)}
-                    activeOpacity={0.8}
+                ) : error ? (
+                  <View style={styles.centerContainer}>
+                    <View style={styles.errorIcon}>
+                      <Feather name="wifi-off" size={28} color="#ef4444" />
+                    </View>
+                    <Text style={styles.errorTitle}>Couldn't load comments</Text>
+                    <Text style={styles.errorSubtext}>{error}</Text>
+                    <TouchableOpacity 
+                      style={styles.retryButton}
+                      onPress={() => fetchComments(1, true)}
+                      activeOpacity={0.8}
+                    >
+                      <Feather name="refresh-cw" size={14} color="#fff" />
+                      <Text style={styles.retryButtonText}>Try Again</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.centerContainer}>
+                    <View style={styles.emptyIcon}>
+                      <Feather name="message-circle" size={36} color="#3b82f6" />
+                    </View>
+                    <Text style={styles.emptyTitle}>No comments yet</Text>
+                    <Text style={styles.emptySubtext}>Be the first to share your thoughts!</Text>
+                  </View>
+                )
+              }
+              ListFooterComponent={
+                loadingMore ? (
+                  <View style={styles.loadMoreContainer}>
+                    <ActivityIndicator size="small" color="#3b82f6" />
+                  </View>
+                ) : null
+              }
+            />
+
+            {/* Input Area - fixed at bottom of modal */}
+            <View style={[
+              styles.inputWrapper,
+              { 
+                paddingBottom: isKeyboardVisible ? 8 : Math.max(insets.bottom, 16)
+              }
+            ]}>
+              {user ? (
+                <View style={styles.inputContainer}>
+                  <Image
+                    source={{ uri: user.profile_picture || 'https://via.placeholder.com/36' }}
+                    style={styles.inputAvatar}
+                  />
+                  <View style={styles.inputFieldWrapper}>
+                    <TextInput
+                      ref={inputRef}
+                      style={styles.commentInput}
+                      placeholder="Write a comment..."
+                      placeholderTextColor="#636366"
+                      value={commentText}
+                      onChangeText={setCommentText}
+                      multiline
+                      maxLength={500}
+                      blurOnSubmit={false}
+                      returnKeyType="default"
+                      editable={!submitting}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.sendButton,
+                      (!commentText.trim() || submitting) && styles.sendButtonDisabled
+                    ]}
+                    onPress={submitComment}
+                    disabled={!commentText.trim() || submitting}
+                    activeOpacity={0.7}
                   >
-                    <Feather name="refresh-cw" size={14} color="#fff" />
-                    <Text style={styles.retryButtonText}>Try Again</Text>
+                    {submitting ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Feather 
+                        name="send" 
+                        size={18} 
+                        color={commentText.trim() ? '#fff' : '#636366'} 
+                      />
+                    )}
                   </TouchableOpacity>
                 </View>
               ) : (
-                <View style={styles.centerContainer}>
-                  <View style={styles.emptyIcon}>
-                    <Feather name="message-circle" size={36} color="#3b82f6" />
-                  </View>
-                  <Text style={styles.emptyTitle}>No comments yet</Text>
-                  <Text style={styles.emptySubtext}>Be the first to share your thoughts!</Text>
-                </View>
-              )
-            }
-            ListFooterComponent={
-              loadingMore ? (
-                <View style={styles.loadMoreContainer}>
-                  <ActivityIndicator size="small" color="#3b82f6" />
-                </View>
-              ) : null
-            }
-          />
-
-          {/* Comment Input Area - Fixed at bottom */}
-          <View style={[
-            styles.inputWrapper,
-            { 
-              paddingBottom: Platform.OS === 'ios' 
-                ? (keyboardHeight > 0 ? 8 : Math.max(insets.bottom, 16))
-                : 16
-            }
-          ]}>
-            {user ? (
-              <View style={styles.inputContainer}>
-                <Image
-                  source={{ uri: user.profile_picture || 'https://via.placeholder.com/36' }}
-                  style={styles.inputAvatar}
-                />
-                <View style={styles.inputFieldWrapper}>
-                  <TextInput
-                    ref={inputRef}
-                    style={[
-                      styles.commentInput,
-                      inputFocused && styles.commentInputFocused
-                    ]}
-                    placeholder="Write a comment..."
-                    placeholderTextColor="#636366"
-                    value={commentText}
-                    onChangeText={setCommentText}
-                    multiline
-                    maxLength={500}
-                    blurOnSubmit={false}
-                    returnKeyType="default"
-                    editable={!submitting}
-                    onFocus={() => setInputFocused(true)}
-                    onBlur={() => setInputFocused(false)}
-                  />
-                </View>
-                <TouchableOpacity
-                  style={[
-                    styles.sendButton,
-                    (!commentText.trim() || submitting) && styles.sendButtonDisabled
-                  ]}
-                  onPress={submitComment}
-                  disabled={!commentText.trim() || submitting}
+                <TouchableOpacity 
+                  style={styles.loginPrompt}
+                  onPress={handleLoginPress}
                   activeOpacity={0.7}
                 >
-                  {submitting ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Feather 
-                      name="send" 
-                      size={18} 
-                      color={commentText.trim() ? '#fff' : '#636366'} 
-                    />
-                  )}
+                  <View style={styles.loginPromptIcon}>
+                    <Feather name="log-in" size={16} color="#3b82f6" />
+                  </View>
+                  <Text style={styles.loginText}>Sign in to comment</Text>
+                  <Feather name="chevron-right" size={18} color="#3b82f6" />
                 </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity 
-                style={styles.loginPrompt}
-                onPress={handleLoginPress}
-                activeOpacity={0.7}
-              >
-                <View style={styles.loginPromptIcon}>
-                  <Feather name="log-in" size={16} color="#3b82f6" />
+              )}
+              
+              {commentText.length > 0 && (
+                <View style={styles.charCountContainer}>
+                  <Text style={[
+                    styles.charCount,
+                    commentText.length > 450 && styles.charCountWarning
+                  ]}>
+                    {commentText.length}/500
+                  </Text>
                 </View>
-                <Text style={styles.loginText}>Sign in to comment</Text>
-                <Feather name="chevron-right" size={18} color="#3b82f6" />
-              </TouchableOpacity>
-            )}
-            
-            {/* Character count when typing */}
-            {commentText.length > 0 && (
-              <View style={styles.charCountContainer}>
-                <Text style={[
-                  styles.charCount,
-                  commentText.length > 450 && styles.charCountWarning
-                ]}>
-                  {commentText.length}/500
-                </Text>
-              </View>
-            )}
-          </View>
+              )}
+            </View>
+          </Animated.View>
         </Animated.View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  modalOverlay: {
+    flex: 1,
+  },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
   },
-  keyboardAvoidingView: {
-    flex: 1,
-    justifyContent: 'flex-end',
+  modalWrapper: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   modalContainer: {
     backgroundColor: '#1a1a1c',
@@ -827,7 +874,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2c2c2e',
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#2c2c2e',
+    borderColor: '#3c3c3e',
     paddingHorizontal: 14,
     paddingTop: Platform.OS === 'ios' ? 10 : 8,
     paddingBottom: Platform.OS === 'ios' ? 10 : 8,
@@ -835,9 +882,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     maxHeight: 100,
     minHeight: 38,
-  },
-  commentInputFocused: {
-    borderColor: '#3b82f6',
   },
   sendButton: {
     width: 38,

@@ -1,24 +1,24 @@
-import { useEffect, useState } from 'react';
-import websocketService, { NotificationUpdate } from '../websocket-service';
+import { useEffect, useState, useCallback } from 'react';
+import { useRealtime } from '../realtime-context';
+import { NotificationUpdate } from '../websocket-service';
 
 export const useRealtimeNotifications = () => {
+  const { onNewNotification, isConnected } = useRealtime();
   const [newNotifications, setNewNotifications] = useState<NotificationUpdate['notification'][]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    const handleNewNotification = (update: NotificationUpdate) => {
+    const unsubscribe = onNewNotification((update: NotificationUpdate) => {
       setNewNotifications(prev => [update.notification, ...prev]);
-      setUnreadCount(prev => prev + 1);
-    };
+      if (!update.notification.isRead) {
+        setUnreadCount(prev => prev + 1);
+      }
+    });
 
-    websocketService.on('newNotification', handleNewNotification);
+    return unsubscribe;
+  }, [onNewNotification]);
 
-    return () => {
-      websocketService.off('newNotification', handleNewNotification);
-    };
-  }, []);
-
-  const markNotificationAsRead = (notificationId: string) => {
+  const markNotificationAsRead = useCallback((notificationId: string) => {
     setNewNotifications(prev => 
       prev.map(notif => 
         notif.id === notificationId 
@@ -27,17 +27,18 @@ export const useRealtimeNotifications = () => {
       )
     );
     setUnreadCount(prev => Math.max(0, prev - 1));
-  };
+  }, []);
 
-  const clearNewNotifications = () => {
+  const clearNewNotifications = useCallback(() => {
     setNewNotifications([]);
     setUnreadCount(0);
-  };
+  }, []);
 
   return {
     newNotifications,
     unreadCount,
+    isConnected,
     markNotificationAsRead,
     clearNewNotifications,
   };
-}; 
+};

@@ -538,7 +538,8 @@ export const postsApi = {
       const trimmedContent = content.trim();
       console.log('addComment API call:', { postId, contentLength: trimmedContent.length, contentPreview: trimmedContent.substring(0, 50) });
       
-      const response = await apiClient.post(`/api/posts/${postId}/comments`, { content: trimmedContent });
+      // Backend expects 'text' field, not 'content'
+      const response = await apiClient.post(`/api/posts/${postId}/comments`, { text: trimmedContent });
       return response.data;
     } catch (error: any) {
       console.error('Add comment API error:', error);

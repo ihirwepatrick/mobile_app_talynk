@@ -51,7 +51,7 @@ export default function PostDetailScreen() {
         setPost(response.data);
       }
     } catch (error) {
-      console.error('Error fetching post:', error);4
+      console.error('Error fetching post:', error);
     } finally {
       setLoading(false);
     }
@@ -291,7 +291,7 @@ export default function PostDetailScreen() {
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-          <Feather name="share" size={24} color="#fff" />
+          <Feather name="git-branch" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
 

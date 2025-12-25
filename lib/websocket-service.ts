@@ -1,4 +1,5 @@
 import { SimpleEventEmitter } from './simple-event-emitter';
+import { API_BASE_URL } from './config';
 
 export interface WebSocketMessage {
   type: string;
@@ -18,11 +19,13 @@ export interface CommentUpdate {
   comment: {
     id: string;
     text: string;
+    content?: string;
     user: {
       id: string;
       name: string;
       username: string;
       avatar?: string;
+      profile_picture?: string;
     };
     createdAt: string;
   };
@@ -38,126 +41,223 @@ export interface NotificationUpdate {
   };
 }
 
+export interface LikeUpdate {
+  postId: string;
+  userId: string;
+  isLiked: boolean;
+  likeCount: number;
+}
+
 class WebSocketService extends SimpleEventEmitter {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;
+  private maxReconnectAttempts = 3; // Reduced from 10
+  private reconnectDelay = 2000;
   private isConnecting = false;
-  private heartbeatInterval: any = null;
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private userId: string | null = null;
+  private token: string | null = null;
+  private messageQueue: Array<{ type: string; data: any }> = [];
+  private subscribedPosts = new Set<string>();
+  private connectionEnabled = true; // Flag to disable reconnection
 
   constructor() {
     super();
   }
 
   connect(userId: string, token: string) {
-    if (this.isConnecting || this.ws?.readyState === WebSocket.OPEN) {
+    // Don't connect if disabled or already connecting
+    if (!this.connectionEnabled || this.isConnecting) {
+      return;
+    }
+
+    if (this.ws?.readyState === WebSocket.OPEN) {
       return;
     }
 
     this.isConnecting = true;
     this.userId = userId;
+    this.token = token;
 
     try {
-      // In a real app, you'd connect to your WebSocket server
-      // For now, we'll simulate WebSocket behavior with polling
-      this.simulateWebSocketConnection();
+      // Try to connect to WebSocket server
+      // Use /api/ws or /socket.io based on your backend
+      const wsProtocol = API_BASE_URL.startsWith('https') ? 'wss' : 'ws';
+      const wsHost = API_BASE_URL.replace(/^https?:\/\//, '');
+      const fullUrl = `${wsProtocol}://${wsHost}/ws?userId=${userId}&token=${token}`;
+      
+      console.log('[WS] Attempting connection...');
+      
+      this.ws = new WebSocket(fullUrl);
+
+      // Set a connection timeout
+      const connectionTimeout = setTimeout(() => {
+        if (this.ws?.readyState !== WebSocket.OPEN) {
+          console.log('[WS] Connection timeout, disabling WebSocket');
+          this.disableConnection();
+        }
+      }, 5000);
+
+      this.ws.onopen = () => {
+        clearTimeout(connectionTimeout);
+        console.log('[WS] Connected successfully');
+        this.isConnecting = false;
+        this.reconnectAttempts = 0;
+        this.reconnectDelay = 2000;
+        this.emit('connected');
+        
+        this.startHeartbeat();
+        this.processMessageQueue();
+        this.resubscribeToPosts();
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          this.handleMessage(message);
+        } catch (error) {
+          // Silently ignore parse errors
+        }
+      };
+
+      this.ws.onerror = (error) => {
+        clearTimeout(connectionTimeout);
+        console.log('[WS] Connection error - backend may not support WebSocket');
+        this.isConnecting = false;
+        // Don't spam error events
+      };
+
+      this.ws.onclose = (event) => {
+        clearTimeout(connectionTimeout);
+        this.isConnecting = false;
+        this.stopHeartbeat();
+        this.emit('disconnected');
+        
+        // Only attempt to reconnect if connection was previously successful
+        // and we haven't exceeded max attempts
+        if (this.connectionEnabled && this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.handleReconnect();
+        } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          console.log('[WS] Max reconnection attempts reached, disabling WebSocket');
+          this.disableConnection();
+        }
+      };
+
     } catch (error) {
-      console.error('WebSocket connection failed:', error);
-      this.handleReconnect();
+      console.log('[WS] Failed to create WebSocket connection');
+      this.isConnecting = false;
+      this.disableConnection();
     }
   }
 
-  private simulateWebSocketConnection() {
-    // Simulate WebSocket connection
-    this.ws = {
-      readyState: WebSocket.OPEN,
-      close: () => {},
-      send: (data: string) => {
-        // Simulate sending data
-        console.log('WebSocket send:', data);
-      }
-    } as any;
-
+  private disableConnection() {
+    this.connectionEnabled = false;
     this.isConnecting = false;
-    this.reconnectAttempts = 0;
-    this.emit('connected');
-    
-    // Start heartbeat
-    this.startHeartbeat();
-    
-    // Simulate real-time updates
-    this.startSimulatedUpdates();
+    this.stopHeartbeat();
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch (e) {
+        // Ignore close errors
+      }
+      this.ws = null;
+    }
+    this.emit('disabled');
+  }
+
+  private handleMessage(message: WebSocketMessage) {
+    const { type, data } = message;
+
+    switch (type) {
+      case 'pong':
+        break;
+
+      case 'like':
+      case 'likeUpdate':
+        this.emit('likeUpdate', data as LikeUpdate);
+        this.emit('postUpdate', {
+          postId: data.postId,
+          likes: data.likeCount,
+          isLiked: data.isLiked,
+        } as PostUpdate);
+        break;
+
+      case 'comment':
+      case 'newComment':
+        this.emit('newComment', data as CommentUpdate);
+        break;
+
+      case 'postUpdate':
+        this.emit('postUpdate', data as PostUpdate);
+        break;
+
+      case 'notification':
+      case 'newNotification':
+        this.emit('newNotification', data as NotificationUpdate);
+        break;
+
+      case 'follow':
+      case 'followUpdate':
+        this.emit('followUpdate', data);
+        break;
+
+      default:
+        break;
+    }
   }
 
   private startHeartbeat() {
+    this.stopHeartbeat();
     this.heartbeatInterval = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.send({ type: 'ping', data: { timestamp: Date.now() } });
       }
-    }, 30000); // 30 seconds
+    }, 30000);
   }
 
-  private startSimulatedUpdates() {
-    // Simulate real-time post updates
-    setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        // Simulate like updates
-        this.emit('postUpdate', {
-          postId: 'simulated-post-' + Math.floor(Math.random() * 1000),
-          likes: Math.floor(Math.random() * 100),
-          comments: Math.floor(Math.random() * 50),
-          isLiked: Math.random() > 0.5
-        } as PostUpdate);
-
-        // Simulate new comments
-        if (Math.random() > 0.7) {
-          this.emit('newComment', {
-            postId: 'simulated-post-' + Math.floor(Math.random() * 1000),
-            comment: {
-              id: 'comment-' + Date.now(),
-              text: 'Great post! 👍',
-              user: {
-                id: 'user-' + Math.floor(Math.random() * 100),
-                name: 'User ' + Math.floor(Math.random() * 100),
-                username: 'user' + Math.floor(Math.random() * 100),
-                avatar: 'https://via.placeholder.com/32'
-              },
-              createdAt: new Date().toISOString()
-            }
-          } as CommentUpdate);
-        }
-
-        // Simulate notifications
-        if (Math.random() > 0.8) {
-          this.emit('newNotification', {
-            notification: {
-              id: 'notif-' + Date.now(),
-              type: ['like', 'comment', 'follow'][Math.floor(Math.random() * 3)],
-              text: 'Someone liked your post!',
-              isRead: false,
-              createdAt: new Date().toISOString()
-            }
-          } as NotificationUpdate);
-        }
-      }
-    }, 5000); // Every 5 seconds
-  }
-
-  disconnect() {
+  private stopHeartbeat() {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
+  }
+
+  private processMessageQueue() {
+    while (this.messageQueue.length > 0) {
+      const message = this.messageQueue.shift();
+      if (message) {
+        this.send(message);
+      }
+    }
+  }
+
+  private resubscribeToPosts() {
+    this.subscribedPosts.forEach(postId => {
+      this.send({
+        type: 'subscribe',
+        data: { postId, userId: this.userId }
+      });
+    });
+  }
+
+  disconnect() {
+    this.stopHeartbeat();
+    this.connectionEnabled = false;
 
     if (this.ws) {
-      this.ws.close();
+      try {
+        this.ws.close(1000, 'User disconnected');
+      } catch (e) {
+        // Ignore
+      }
       this.ws = null;
     }
 
     this.isConnecting = false;
     this.userId = null;
+    this.token = null;
+    this.messageQueue = [];
+    this.subscribedPosts.clear();
     this.emit('disconnected');
   }
 
@@ -168,44 +268,63 @@ class WebSocketService extends SimpleEventEmitter {
         data: message.data,
         timestamp: Date.now()
       };
-      this.ws.send(JSON.stringify(fullMessage));
+      try {
+        this.ws.send(JSON.stringify(fullMessage));
+      } catch (e) {
+        // Queue on failure
+        this.messageQueue.push(message);
+      }
+    } else {
+      // Queue message for when connection is established
+      this.messageQueue.push(message);
     }
   }
 
   private handleReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
-      this.emit('reconnectFailed');
-      return;
-    }
-
+    if (!this.connectionEnabled) return;
+    
     this.reconnectAttempts++;
-    this.reconnectDelay *= 2; // Exponential backoff
+    const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 10000);
+
+    console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
 
     setTimeout(() => {
-      if (this.userId) {
-        this.connect(this.userId, 'token'); // In real app, pass actual token
+      if (this.connectionEnabled && this.userId && this.token) {
+        this.connect(this.userId, this.token);
       }
-    }, this.reconnectDelay);
+    }, delay);
   }
 
-  // Subscribe to specific post updates
+  isConnectedNow(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  // Enable connection (call this to re-enable after being disabled)
+  enableConnection() {
+    this.connectionEnabled = true;
+    this.reconnectAttempts = 0;
+  }
+
   subscribeToPost(postId: string) {
-    this.send({
-      type: 'subscribe',
-      data: { postId, userId: this.userId }
-    });
+    this.subscribedPosts.add(postId);
+    if (this.isConnectedNow()) {
+      this.send({
+        type: 'subscribe',
+        data: { postId, userId: this.userId }
+      });
+    }
   }
 
-  // Unsubscribe from post updates
   unsubscribeFromPost(postId: string) {
-    this.send({
-      type: 'unsubscribe',
-      data: { postId, userId: this.userId }
-    });
+    this.subscribedPosts.delete(postId);
+    if (this.isConnectedNow()) {
+      this.send({
+        type: 'unsubscribe',
+        data: { postId, userId: this.userId }
+      });
+    }
   }
 
-  // Send like/unlike action
   sendLikeAction(postId: string, isLiked: boolean) {
     this.send({
       type: 'like',
@@ -213,7 +332,6 @@ class WebSocketService extends SimpleEventEmitter {
     });
   }
 
-  // Send comment action
   sendCommentAction(postId: string, commentText: string) {
     this.send({
       type: 'comment',
@@ -221,7 +339,6 @@ class WebSocketService extends SimpleEventEmitter {
     });
   }
 
-  // Send follow/unfollow action
   sendFollowAction(targetUserId: string, isFollowing: boolean) {
     this.send({
       type: 'follow',
@@ -231,4 +348,4 @@ class WebSocketService extends SimpleEventEmitter {
 }
 
 export const websocketService = new WebSocketService();
-export default websocketService; 
+export default websocketService;

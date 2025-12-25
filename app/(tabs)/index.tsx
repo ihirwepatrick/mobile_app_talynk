@@ -547,7 +547,7 @@ const PostItem: React.FC<PostItemProps> = ({
 
           {/* Share Button */}
           <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
-            <Feather name="share" size={24} color="#fff" />
+            <Feather name="git-branch" size={24} color="#fff" />
           </TouchableOpacity>
 
           {/* More Actions */}
