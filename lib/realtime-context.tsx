@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface RealtimeContextType {
   isConnected: boolean;
+  isAvailable: boolean; // Whether real-time features are supported
   subscribeToPost: (postId: string) => void;
   unsubscribeFromPost: (postId: string) => void;
   sendLikeAction: (postId: string, isLiked: boolean) => void;
@@ -25,6 +26,7 @@ export const useRealtime = () => {
     // Return a dummy context for components that might use it outside provider
     return {
       isConnected: false,
+      isAvailable: false,
       subscribeToPost: () => {},
       unsubscribeFromPost: () => {},
       sendLikeAction: () => {},
@@ -47,6 +49,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
   const { user, token } = useAuth();
   const { updateLikedPosts } = useCache();
   const [isConnected, setIsConnected] = useState(false);
+  const [isAvailable, setIsAvailable] = useState(true);
   const subscribedPosts = useRef<Set<string>>(new Set());
   const postUpdateCallbacks = useRef<Set<(update: PostUpdate) => void>>(new Set());
   const commentCallbacks = useRef<Set<(update: CommentUpdate) => void>>(new Set());
@@ -67,36 +70,32 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
         
         const handleConnected = () => {
           setIsConnected(true);
-          console.log('[Realtime] WebSocket connected');
+          setIsAvailable(true);
         };
 
         const handleDisconnected = () => {
           setIsConnected(false);
-          console.log('[Realtime] WebSocket disconnected');
         };
 
-        const handleReconnectFailed = () => {
+        const handleDisabled = () => {
+          // WebSocket is not available on this backend
           setIsConnected(false);
-          console.log('[Realtime] WebSocket reconnect failed');
+          setIsAvailable(false);
         };
 
         const handlePostUpdate = (update: PostUpdate) => {
-          console.log('[Realtime] Post update:', update);
           postUpdateCallbacks.current.forEach(callback => callback(update));
         };
 
         const handleNewComment = (update: CommentUpdate) => {
-          console.log('[Realtime] New comment:', update);
           commentCallbacks.current.forEach(callback => callback(update));
         };
 
         const handleNewNotification = (update: NotificationUpdate) => {
-          console.log('[Realtime] New notification:', update);
           notificationCallbacks.current.forEach(callback => callback(update));
         };
 
         const handleLikeUpdate = (update: LikeUpdate) => {
-          console.log('[Realtime] Like update:', update);
           // Update cache if it's for the current user
           if (update.userId === user.id) {
             updateLikedPosts(update.postId, update.isLiked);
@@ -106,7 +105,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
 
         websocketService.on('connected', handleConnected);
         websocketService.on('disconnected', handleDisconnected);
-        websocketService.on('reconnectFailed', handleReconnectFailed);
+        websocketService.on('disabled', handleDisabled);
         websocketService.on('postUpdate', handlePostUpdate);
         websocketService.on('newComment', handleNewComment);
         websocketService.on('newNotification', handleNewNotification);
@@ -115,7 +114,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
         return () => {
           websocketService.off('connected', handleConnected);
           websocketService.off('disconnected', handleDisconnected);
-          websocketService.off('reconnectFailed', handleReconnectFailed);
+          websocketService.off('disabled', handleDisabled);
           websocketService.off('postUpdate', handlePostUpdate);
           websocketService.off('newComment', handleNewComment);
           websocketService.off('newNotification', handleNewNotification);
@@ -184,6 +183,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
 
   const value: RealtimeContextType = {
     isConnected,
+    isAvailable,
     subscribeToPost,
     unsubscribeFromPost,
     sendLikeAction,

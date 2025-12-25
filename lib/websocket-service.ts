@@ -51,7 +51,7 @@ export interface LikeUpdate {
 class WebSocketService extends SimpleEventEmitter {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 3; // Reduced from 10
+  private maxReconnectAttempts = 2; // Reduced - fail fast if backend doesn't support WS
   private reconnectDelay = 2000;
   private isConnecting = false;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
@@ -59,7 +59,9 @@ class WebSocketService extends SimpleEventEmitter {
   private token: string | null = null;
   private messageQueue: Array<{ type: string; data: any }> = [];
   private subscribedPosts = new Set<string>();
-  private connectionEnabled = true; // Flag to disable reconnection
+  private connectionEnabled = true;
+  private hasConnectedOnce = false; // Track if we've ever successfully connected
+  private silentMode = false; // Suppress logs after initial failure
 
   constructor() {
     super();
@@ -80,30 +82,31 @@ class WebSocketService extends SimpleEventEmitter {
     this.token = token;
 
     try {
-      // Try to connect to WebSocket server
-      // Use /api/ws or /socket.io based on your backend
       const wsProtocol = API_BASE_URL.startsWith('https') ? 'wss' : 'ws';
       const wsHost = API_BASE_URL.replace(/^https?:\/\//, '');
       const fullUrl = `${wsProtocol}://${wsHost}/ws?userId=${userId}&token=${token}`;
       
-      console.log('[WS] Attempting connection...');
+      if (!this.silentMode) {
+        console.log('[WS] Attempting to connect to real-time server...');
+      }
       
       this.ws = new WebSocket(fullUrl);
 
-      // Set a connection timeout
+      // Set a short connection timeout - fail fast
       const connectionTimeout = setTimeout(() => {
         if (this.ws?.readyState !== WebSocket.OPEN) {
-          console.log('[WS] Connection timeout, disabling WebSocket');
-          this.disableConnection();
+          this.handleConnectionFailure();
         }
-      }, 5000);
+      }, 3000);
 
       this.ws.onopen = () => {
         clearTimeout(connectionTimeout);
-        console.log('[WS] Connected successfully');
+        console.log('[WS] ✓ Real-time connection established');
         this.isConnecting = false;
         this.reconnectAttempts = 0;
         this.reconnectDelay = 2000;
+        this.hasConnectedOnce = true;
+        this.silentMode = false;
         this.emit('connected');
         
         this.startHeartbeat();
@@ -120,39 +123,63 @@ class WebSocketService extends SimpleEventEmitter {
         }
       };
 
-      this.ws.onerror = (error) => {
+      this.ws.onerror = () => {
         clearTimeout(connectionTimeout);
-        console.log('[WS] Connection error - backend may not support WebSocket');
         this.isConnecting = false;
-        // Don't spam error events
+        // Only log on first attempt
+        if (this.reconnectAttempts === 0 && !this.silentMode) {
+          console.log('[WS] Real-time server not available');
+        }
       };
 
-      this.ws.onclose = (event) => {
+      this.ws.onclose = () => {
         clearTimeout(connectionTimeout);
         this.isConnecting = false;
         this.stopHeartbeat();
-        this.emit('disconnected');
         
-        // Only attempt to reconnect if connection was previously successful
-        // and we haven't exceeded max attempts
-        if (this.connectionEnabled && this.reconnectAttempts < this.maxReconnectAttempts) {
+        // Only emit disconnected if we were previously connected
+        if (this.hasConnectedOnce) {
+          this.emit('disconnected');
+        }
+        
+        // Only reconnect if we've successfully connected before
+        if (this.hasConnectedOnce && this.connectionEnabled && this.reconnectAttempts < this.maxReconnectAttempts) {
           this.handleReconnect();
-        } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-          console.log('[WS] Max reconnection attempts reached, disabling WebSocket');
-          this.disableConnection();
+        } else if (!this.hasConnectedOnce) {
+          // Never connected - backend doesn't support WebSocket
+          this.handleConnectionFailure();
         }
       };
 
     } catch (error) {
-      console.log('[WS] Failed to create WebSocket connection');
       this.isConnecting = false;
+      this.handleConnectionFailure();
+    }
+  }
+
+  private handleConnectionFailure() {
+    this.reconnectAttempts++;
+    
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      if (!this.silentMode) {
+        console.log('[WS] Real-time features unavailable - using standard updates');
+      }
       this.disableConnection();
+    } else {
+      // Try one more time silently
+      this.silentMode = true;
+      setTimeout(() => {
+        if (this.connectionEnabled && this.userId && this.token) {
+          this.connect(this.userId, this.token);
+        }
+      }, this.reconnectDelay);
     }
   }
 
   private disableConnection() {
     this.connectionEnabled = false;
     this.isConnecting = false;
+    this.silentMode = true;
     this.stopHeartbeat();
     if (this.ws) {
       try {
@@ -258,7 +285,9 @@ class WebSocketService extends SimpleEventEmitter {
     this.token = null;
     this.messageQueue = [];
     this.subscribedPosts.clear();
-    this.emit('disconnected');
+    if (this.hasConnectedOnce) {
+      this.emit('disconnected');
+    }
   }
 
   send(message: { type: string; data: any }) {
@@ -274,10 +303,11 @@ class WebSocketService extends SimpleEventEmitter {
         // Queue on failure
         this.messageQueue.push(message);
       }
-    } else {
+    } else if (this.connectionEnabled) {
       // Queue message for when connection is established
       this.messageQueue.push(message);
     }
+    // If connection disabled, silently drop the message - REST API will handle it
   }
 
   private handleReconnect() {
@@ -286,7 +316,9 @@ class WebSocketService extends SimpleEventEmitter {
     this.reconnectAttempts++;
     const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 10000);
 
-    console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    if (!this.silentMode) {
+      console.log(`[WS] Reconnecting in ${delay / 1000}s...`);
+    }
 
     setTimeout(() => {
       if (this.connectionEnabled && this.userId && this.token) {
@@ -299,10 +331,17 @@ class WebSocketService extends SimpleEventEmitter {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  // Check if real-time is available
+  isAvailable(): boolean {
+    return this.connectionEnabled && this.hasConnectedOnce;
+  }
+
   // Enable connection (call this to re-enable after being disabled)
   enableConnection() {
     this.connectionEnabled = true;
     this.reconnectAttempts = 0;
+    this.silentMode = false;
+    this.hasConnectedOnce = false;
   }
 
   subscribeToPost(postId: string) {
