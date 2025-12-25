@@ -538,8 +538,8 @@ export const postsApi = {
       const trimmedContent = content.trim();
       console.log('addComment API call:', { postId, contentLength: trimmedContent.length, contentPreview: trimmedContent.substring(0, 50) });
       
-      // Backend expects 'text' field, not 'content'
-      const response = await apiClient.post(`/api/posts/${postId}/comments`, { text: trimmedContent });
+      // Backend expects 'comment_text' field
+      const response = await apiClient.post(`/api/posts/${postId}/comments`, { comment_text: trimmedContent });
       return response.data;
     } catch (error: any) {
       console.error('Add comment API error:', error);
@@ -557,6 +557,39 @@ export const postsApi = {
       };
     }
   },
+
+  deleteComment: async (commentId: string): Promise<ApiResponse<null>> => {
+    try {
+      const response = await apiClient.delete(`/api/posts/comments/${commentId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Delete comment API error:', error);
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to delete comment',
+        data: null,
+      };
+    }
+  },
+
+  reportComment: async (commentId: string, reason: string, description?: string): Promise<ApiResponse<null>> => {
+    try {
+      const body: { reason: string; description?: string } = { reason };
+      if (description) {
+        body.description = description;
+      }
+      const response = await apiClient.post(`/api/posts/comments/${commentId}/report`, body);
+      return response.data;
+    } catch (error: any) {
+      console.error('Report comment API error:', error);
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to report comment',
+        data: null,
+      };
+    }
+  },
+
   deletePost: async (postId: string) => {
     const response = await apiClient.delete(`/api/posts/${postId}`);
     return response.data;

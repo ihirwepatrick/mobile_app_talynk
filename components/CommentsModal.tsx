@@ -15,6 +15,7 @@ import {
   Dimensions,
   Keyboard,
   Pressable,
+  ActionSheetIOS,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { postsApi } from '@/lib/api';
@@ -28,6 +29,7 @@ const MODAL_HEIGHT = SCREEN_HEIGHT * 0.7;
 interface Comment {
   id?: string;
   comment_id?: string;
+  commentor_id?: string;
   content?: string;
   comment_text?: string;
   createdAt?: string;
@@ -53,9 +55,11 @@ interface CommentsModalProps {
   visible: boolean;
   onClose: () => void;
   postId: string;
+  postOwnerId?: string;
   postTitle?: string;
   postAuthor?: string;
   onCommentAdded?: () => void;
+  onCommentDeleted?: () => void;
 }
 
 const formatTimeAgo = (dateString: string): string => {
@@ -70,13 +74,24 @@ const formatTimeAgo = (dateString: string): string => {
   return `${Math.floor(diffInSeconds / 2592000)}mo`;
 };
 
+const REPORT_REASONS = [
+  'Spam',
+  'Harassment or bullying',
+  'Hate speech',
+  'Inappropriate content',
+  'Misinformation',
+  'Other',
+];
+
 export default function CommentsModal({ 
   visible, 
   onClose, 
   postId, 
+  postOwnerId,
   postTitle, 
   postAuthor,
   onCommentAdded,
+  onCommentDeleted,
 }: CommentsModalProps) {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
@@ -89,6 +104,12 @@ export default function CommentsModal({
   const [commentText, setCommentText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [selectedComment, setSelectedComment] = useState<Comment | null>(null);
+  const [showOptionsModal, setShowOptionsModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [reportDescription, setReportDescription] = useState('');
+  const [reportSubmitting, setReportSubmitting] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
   const isMounted = useRef(true);
@@ -182,6 +203,11 @@ export default function CommentsModal({
           setError(null);
           setCommentText('');
           setKeyboardHeight(0);
+          setSelectedComment(null);
+          setShowOptionsModal(false);
+          setShowReportModal(false);
+          setReportReason('');
+          setReportDescription('');
         }
       }, 300);
       return () => clearTimeout(timer);
@@ -309,8 +335,11 @@ export default function CommentsModal({
               profile_picture: user.profile_picture,
             };
           }
-          if (!newComment.createdAt && !newComment.created_at) {
-            newComment.createdAt = new Date().toISOString();
+          if (!newComment.createdAt && !newComment.created_at && !newComment.comment_date) {
+            newComment.comment_date = new Date().toISOString();
+          }
+          if (!newComment.commentor_id) {
+            newComment.commentor_id = user.id;
           }
           
           setComments(prev => [newComment, ...prev]);
@@ -341,6 +370,122 @@ export default function CommentsModal({
     }
   };
 
+  const handleDeleteComment = async (comment: Comment) => {
+    const commentId = comment.comment_id || comment.id;
+    if (!commentId) {
+      Alert.alert('Error', 'Cannot delete this comment');
+      return;
+    }
+
+    Alert.alert(
+      'Delete Comment',
+      'Are you sure you want to delete this comment?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await postsApi.deleteComment(commentId);
+              
+              if (response.status === 'success') {
+                setComments(prev => prev.filter(c => 
+                  (c.comment_id || c.id) !== commentId
+                ));
+                onCommentDeleted?.();
+                Alert.alert('Success', 'Comment deleted');
+              } else {
+                Alert.alert('Error', response.message || 'Failed to delete comment');
+              }
+            } catch (error) {
+              console.error('Delete comment error:', error);
+              Alert.alert('Error', 'Failed to delete comment');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleReportComment = async () => {
+    if (!selectedComment || !reportReason) {
+      Alert.alert('Error', 'Please select a reason for reporting');
+      return;
+    }
+
+    const commentId = selectedComment.comment_id || selectedComment.id;
+    if (!commentId) {
+      Alert.alert('Error', 'Cannot report this comment');
+      return;
+    }
+
+    try {
+      setReportSubmitting(true);
+      const response = await postsApi.reportComment(
+        commentId, 
+        reportReason, 
+        reportDescription.trim() || undefined
+      );
+      
+      if (response.status === 'success') {
+        setShowReportModal(false);
+        setSelectedComment(null);
+        setReportReason('');
+        setReportDescription('');
+        Alert.alert('Reported', 'Thank you for reporting this comment. We will review it shortly.');
+      } else {
+        Alert.alert('Error', response.message || 'Failed to report comment');
+      }
+    } catch (error) {
+      console.error('Report comment error:', error);
+      Alert.alert('Error', 'Failed to report comment');
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
+
+  const showCommentOptions = (comment: Comment) => {
+    const commentUser = comment.user || comment.User || {};
+    const commentUserId = comment.commentor_id || (commentUser as any).id;
+    const isOwnComment = user?.id === commentUserId;
+    const isPostOwner = user?.id === postOwnerId;
+    const canDelete = isOwnComment || isPostOwner;
+
+    setSelectedComment(comment);
+
+    if (Platform.OS === 'ios') {
+      const options = canDelete 
+        ? ['Cancel', 'Delete Comment', 'Report Comment']
+        : ['Cancel', 'Report Comment'];
+      const destructiveButtonIndex = canDelete ? 1 : undefined;
+      const cancelButtonIndex = 0;
+
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options,
+          destructiveButtonIndex,
+          cancelButtonIndex,
+        },
+        (buttonIndex) => {
+          if (canDelete) {
+            if (buttonIndex === 1) {
+              handleDeleteComment(comment);
+            } else if (buttonIndex === 2) {
+              setShowReportModal(true);
+            }
+          } else {
+            if (buttonIndex === 1) {
+              setShowReportModal(true);
+            }
+          }
+        }
+      );
+    } else {
+      setShowOptionsModal(true);
+    }
+  };
+
   const handleUserPress = (userId: string) => {
     handleClose();
     setTimeout(() => {
@@ -365,6 +510,8 @@ export default function CommentsModal({
     const profilePicture = (commentUser as any).profile_picture || (commentUser as any).avatar || 'https://via.placeholder.com/40';
     const username = (commentUser as any).username || (commentUser as any).name || 'unknown';
     const userId = (commentUser as any).id;
+    const commentUserId = item.commentor_id || userId;
+    const isOwnComment = user?.id === commentUserId;
     
     return (
       <View style={styles.commentItem}>
@@ -378,17 +525,26 @@ export default function CommentsModal({
           />
         </TouchableOpacity>
         <View style={styles.commentContent}>
-          <View style={styles.commentBubble}>
+          <Pressable 
+            style={styles.commentBubble}
+            onLongPress={() => user && showCommentOptions(item)}
+            delayLongPress={300}
+          >
             <View style={styles.commentHeader}>
               <TouchableOpacity onPress={() => userId && handleUserPress(userId)}>
                 <Text style={styles.commentUsername}>@{username}</Text>
               </TouchableOpacity>
+              {isOwnComment && (
+                <View style={styles.ownerBadge}>
+                  <Text style={styles.ownerBadgeText}>You</Text>
+                </View>
+              )}
               {commentDate && (
                 <Text style={styles.commentTime}>• {formatTimeAgo(commentDate)}</Text>
               )}
             </View>
             <Text style={styles.commentText}>{commentContent}</Text>
-          </View>
+          </Pressable>
           
           <View style={styles.commentActions}>
             <TouchableOpacity style={styles.commentActionButton} activeOpacity={0.6}>
@@ -399,11 +555,157 @@ export default function CommentsModal({
               <Feather name="corner-up-left" size={14} color="#8e8e93" />
               <Text style={styles.commentActionText}>Reply</Text>
             </TouchableOpacity>
+            {user && (
+              <TouchableOpacity 
+                style={styles.commentActionButton} 
+                activeOpacity={0.6}
+                onPress={() => showCommentOptions(item)}
+              >
+                <Feather name="more-horizontal" size={14} color="#8e8e93" />
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>
     );
   };
+
+  // Android Options Modal
+  const renderOptionsModal = () => {
+    if (!selectedComment) return null;
+    
+    const commentUser = selectedComment.user || selectedComment.User || {};
+    const commentUserId = selectedComment.commentor_id || (commentUser as any).id;
+    const isOwnComment = user?.id === commentUserId;
+    const isPostOwner = user?.id === postOwnerId;
+    const canDelete = isOwnComment || isPostOwner;
+
+    return (
+      <Modal
+        visible={showOptionsModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowOptionsModal(false)}
+      >
+        <Pressable 
+          style={styles.optionsOverlay}
+          onPress={() => setShowOptionsModal(false)}
+        >
+          <View style={styles.optionsContainer}>
+            <Text style={styles.optionsTitle}>Comment Options</Text>
+            
+            {canDelete && (
+              <TouchableOpacity 
+                style={styles.optionButton}
+                onPress={() => {
+                  setShowOptionsModal(false);
+                  handleDeleteComment(selectedComment);
+                }}
+              >
+                <Feather name="trash-2" size={20} color="#ef4444" />
+                <Text style={[styles.optionText, styles.optionTextDanger]}>Delete Comment</Text>
+              </TouchableOpacity>
+            )}
+            
+            <TouchableOpacity 
+              style={styles.optionButton}
+              onPress={() => {
+                setShowOptionsModal(false);
+                setShowReportModal(true);
+              }}
+            >
+              <Feather name="flag" size={20} color="#f59e0b" />
+              <Text style={styles.optionText}>Report Comment</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.optionButton, styles.optionButtonCancel]}
+              onPress={() => setShowOptionsModal(false)}
+            >
+              <Text style={styles.optionTextCancel}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
+    );
+  };
+
+  // Report Modal
+  const renderReportModal = () => (
+    <Modal
+      visible={showReportModal}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setShowReportModal(false)}
+    >
+      <View style={styles.reportOverlay}>
+        <View style={styles.reportContainer}>
+          <View style={styles.reportHeader}>
+            <Text style={styles.reportTitle}>Report Comment</Text>
+            <TouchableOpacity onPress={() => setShowReportModal(false)}>
+              <Feather name="x" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          
+          <Text style={styles.reportSubtitle}>Why are you reporting this comment?</Text>
+          
+          <View style={styles.reportReasons}>
+            {REPORT_REASONS.map((reason) => (
+              <TouchableOpacity
+                key={reason}
+                style={[
+                  styles.reportReasonButton,
+                  reportReason === reason && styles.reportReasonButtonActive
+                ]}
+                onPress={() => setReportReason(reason)}
+              >
+                <View style={[
+                  styles.reportRadio,
+                  reportReason === reason && styles.reportRadioActive
+                ]}>
+                  {reportReason === reason && (
+                    <View style={styles.reportRadioInner} />
+                  )}
+                </View>
+                <Text style={[
+                  styles.reportReasonText,
+                  reportReason === reason && styles.reportReasonTextActive
+                ]}>
+                  {reason}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          
+          <Text style={styles.reportDescLabel}>Additional details (optional)</Text>
+          <TextInput
+            style={styles.reportDescInput}
+            placeholder="Provide more context about the issue..."
+            placeholderTextColor="#636366"
+            value={reportDescription}
+            onChangeText={setReportDescription}
+            multiline
+            maxLength={500}
+          />
+          
+          <TouchableOpacity
+            style={[
+              styles.reportSubmitButton,
+              (!reportReason || reportSubmitting) && styles.reportSubmitButtonDisabled
+            ]}
+            onPress={handleReportComment}
+            disabled={!reportReason || reportSubmitting}
+          >
+            {reportSubmitting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.reportSubmitText}>Submit Report</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 
   if (!visible) {
     return null;
@@ -619,6 +921,12 @@ export default function CommentsModal({
           </Animated.View>
         </Animated.View>
       </View>
+
+      {/* Android Options Modal */}
+      {renderOptionsModal()}
+      
+      {/* Report Modal */}
+      {renderReportModal()}
     </Modal>
   );
 }
@@ -742,16 +1050,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
     flexWrap: 'wrap',
+    gap: 6,
   },
   commentUsername: {
     color: '#fff',
     fontSize: 13,
     fontWeight: '600',
   },
+  ownerBadge: {
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  ownerBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
   commentTime: {
     color: '#636366',
     fontSize: 12,
-    marginLeft: 6,
   },
   commentText: {
     color: '#e5e5ea',
@@ -932,5 +1251,163 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     flex: 1,
+  },
+  // Options Modal (Android)
+  optionsOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'flex-end',
+  },
+  optionsContainer: {
+    backgroundColor: '#1a1a1c',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 40,
+  },
+  optionsTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  optionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    backgroundColor: '#2c2c2e',
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  optionButtonCancel: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#3c3c3e',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  optionText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  optionTextDanger: {
+    color: '#ef4444',
+  },
+  optionTextCancel: {
+    color: '#8e8e93',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  // Report Modal
+  reportOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'flex-end',
+  },
+  reportContainer: {
+    backgroundColor: '#1a1a1c',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 40,
+    maxHeight: SCREEN_HEIGHT * 0.8,
+  },
+  reportHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  reportTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  reportSubtitle: {
+    color: '#8e8e93',
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  reportReasons: {
+    gap: 8,
+    marginBottom: 20,
+  },
+  reportReasonButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#2c2c2e',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  reportReasonButtonActive: {
+    borderColor: '#3b82f6',
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+  },
+  reportRadio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#636366',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reportRadioActive: {
+    borderColor: '#3b82f6',
+  },
+  reportRadioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#3b82f6',
+  },
+  reportReasonText: {
+    color: '#e5e5ea',
+    fontSize: 15,
+    flex: 1,
+  },
+  reportReasonTextActive: {
+    color: '#fff',
+    fontWeight: '500',
+  },
+  reportDescLabel: {
+    color: '#8e8e93',
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  reportDescInput: {
+    backgroundColor: '#2c2c2e',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3c3c3e',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#fff',
+    fontSize: 15,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    marginBottom: 20,
+  },
+  reportSubmitButton: {
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  reportSubmitButtonDisabled: {
+    backgroundColor: '#2c2c2e',
+  },
+  reportSubmitText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
