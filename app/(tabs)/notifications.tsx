@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Image,
-  Animated,
 } from 'react-native';
 import { notificationsApi } from '@/lib/api';
 import { router, useFocusEffect } from 'expo-router';
@@ -16,21 +15,7 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useAuth } from '@/lib/auth-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
-
-interface Notification {
-  notification_id: number;
-  user_id: string;
-  notification_text: string;
-  notification_date: string;
-  is_read: boolean;
-  type?: string;
-  related_post_id?: string;
-  related_user_id?: string;
-  related_user?: {
-    username?: string;
-    profile_picture?: string;
-  };
-}
+import { Notification } from '@/types';
 
 const NOTIFICATION_TABS = [
   { key: 'all', label: 'All' },
@@ -57,27 +42,54 @@ export default function NotificationsScreen() {
 
   // Subscribe to real-time notifications
   useEffect(() => {
+    if (!user) return;
+
     const unsubscribe = onNewNotification((update) => {
+      // Handle both "newNotification" and "notification" event types
+      const notificationData = update.notification || update;
+      
       const newNotification: Notification = {
-        notification_id: parseInt(update.notification.id) || Date.now(),
-        user_id: user?.id || '',
-        notification_text: update.notification.text,
-        notification_date: update.notification.createdAt,
-        is_read: update.notification.isRead,
-        type: update.notification.type,
+        id: notificationData.id || Date.now(),
+        userID: notificationData.userID || user.username || '',
+        message: notificationData.message || notificationData.text || '',
+        type: notificationData.type,
+        isRead: notificationData.isRead || notificationData.is_read || false,
+        createdAt: notificationData.createdAt || notificationData.created_at || new Date().toISOString(),
       };
       
-      setNotifications(prev => [newNotification, ...prev]);
+      // Add to top of list, avoid duplicates
+      setNotifications(prev => {
+        const exists = prev.some(n => n.id === newNotification.id);
+        if (exists) return prev;
+        return [newNotification, ...prev];
+      });
     });
 
     return unsubscribe;
-  }, [onNewNotification, user?.id]);
+  }, [onNewNotification, user]);
 
   const loadNotifications = async () => {
+    if (!user) return;
+    
     try {
+      setLoading(true);
       const response = await notificationsApi.getAll();
+      
       if (response.status === 'success' && response.data?.notifications) {
-        setNotifications(response.data.notifications);
+        // Normalize notification structure (handle both old and new formats)
+        const normalized = response.data.notifications.map((n: any) => ({
+          id: n.id || n.notification_id,
+          userID: n.userID || n.user_id || '',
+          message: n.message || n.notification_text || '',
+          type: n.type,
+          isRead: n.isRead !== undefined ? n.isRead : (n.is_read !== undefined ? n.is_read : false),
+          createdAt: n.createdAt || n.notification_date || n.created_at || new Date().toISOString(),
+          related_post_id: n.related_post_id,
+          related_user_id: n.related_user_id,
+          related_user: n.related_user,
+        }));
+        
+        setNotifications(normalized);
       }
     } catch (error) {
       console.error('Error loading notifications:', error);
@@ -92,27 +104,16 @@ export default function NotificationsScreen() {
     loadNotifications();
   };
 
-  const markAsRead = async (notificationId: number) => {
-    try {
-      await notificationsApi.markAsRead(notificationId);
-      setNotifications(prev =>
-        prev.map(notification =>
-          notification.notification_id === notificationId
-            ? { ...notification, is_read: true }
-            : notification
-        )
-      );
-    } catch (error) {
-      console.error('Error marking notification as read:', error);
-    }
-  };
-
   const markAllAsRead = async () => {
+    if (!user) return;
+    
     try {
-      await notificationsApi.markAllAsRead();
-      setNotifications(prev =>
-        prev.map(notification => ({ ...notification, is_read: true }))
-      );
+      const response = await notificationsApi.markAllAsRead();
+      if (response.status === 'success') {
+        setNotifications(prev =>
+          prev.map(notification => ({ ...notification, isRead: true }))
+        );
+      }
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
     }
@@ -120,20 +121,43 @@ export default function NotificationsScreen() {
 
   const getFilteredNotifications = () => {
     if (activeTab === 'unread') {
-      return notifications.filter(n => !n.is_read);
+      return notifications.filter(n => !n.isRead);
     }
     return notifications;
   };
 
-  const getNotificationIcon = (text: string, type?: string) => {
-    const lowerText = text.toLowerCase();
-    if (type === 'like' || lowerText.includes('liked')) return { name: 'favorite', color: '#ff2d55', bg: 'rgba(255, 45, 85, 0.15)' };
-    if (type === 'comment' || lowerText.includes('commented')) return { name: 'chat-bubble', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.15)' };
-    if (type === 'follow' || lowerText.includes('followed')) return { name: 'person-add', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
-    if (lowerText.includes('approved')) return { name: 'check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
-    if (lowerText.includes('rejected')) return { name: 'cancel', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
-    if (lowerText.includes('mention')) return { name: 'alternate-email', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' };
-    return { name: 'notifications', color: '#666', bg: 'rgba(102, 102, 102, 0.15)' };
+  const getNotificationIcon = (type?: string, message?: string) => {
+    const lowerMessage = (message || '').toLowerCase();
+    
+    switch (type) {
+      case 'comment':
+        return { name: 'chat-bubble', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.15)' };
+      case 'follow':
+        return { name: 'person-add', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
+      case 'subscription':
+        return { name: 'subscriptions', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' };
+      case 'post_approved':
+        return { name: 'check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
+      case 'post_rejected':
+        return { name: 'cancel', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
+      case 'post_flagged':
+        return { name: 'flag', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' };
+      case 'post_unfrozen':
+        return { name: 'lock-open', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
+      case 'post_appeal':
+      case 'appeal_approved':
+      case 'appeal_rejected':
+        return { name: 'gavel', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' };
+      case 'post_featured':
+        return { name: 'star', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)' };
+      case 'broadcast':
+        return { name: 'campaign', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' };
+      default:
+        if (lowerMessage.includes('liked')) {
+          return { name: 'favorite', color: '#ff2d55', bg: 'rgba(255, 45, 85, 0.15)' };
+        }
+        return { name: 'notifications', color: '#666', bg: 'rgba(102, 102, 102, 0.15)' };
+    }
   };
 
   const formatTimeAgo = (dateString: string) => {
@@ -156,13 +180,7 @@ export default function NotificationsScreen() {
   };
 
   const handleNotificationPress = (item: Notification) => {
-    // Mark as read first
-    if (!item.is_read) {
-      markAsRead(item.notification_id);
-    }
-    
-    // Navigate based on notification type
-    const lowerText = item.notification_text.toLowerCase();
+    // Navigate based on notification type and related data
     if (item.related_post_id) {
       router.push({
         pathname: '/post/[id]',
@@ -173,44 +191,43 @@ export default function NotificationsScreen() {
         pathname: '/user/[id]',
         params: { id: item.related_user_id }
       });
-    } else if (lowerText.includes('post')) {
-      // Try to extract post reference
-      router.push('/(tabs)');
+    } else if (item.type === 'follow' || item.type === 'subscription') {
+      // Navigate to user profile if available
+      const lowerMessage = item.message.toLowerCase();
+      // Could extract username from message if needed
     }
   };
 
-  const renderNotification = ({ item, index }: { item: Notification; index: number }) => {
-    const icon = getNotificationIcon(item.notification_text, item.type);
+  const renderNotification = ({ item }: { item: Notification }) => {
+    const icon = getNotificationIcon(item.type, item.message);
     
     return (
-      <Animated.View>
-        <TouchableOpacity
-          style={[
-            styles.notificationItem,
-            !item.is_read && styles.notificationItemUnread
-          ]}
-          onPress={() => handleNotificationPress(item)}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.notificationIcon, { backgroundColor: icon.bg }]}>
-            <MaterialIcons name={icon.name as any} size={20} color={icon.color} />
-          </View>
-          
-          <View style={styles.notificationContent}>
-            <Text style={[
-              styles.notificationText,
-              !item.is_read && styles.notificationTextUnread
-            ]}>
-              {item.notification_text}
-            </Text>
-            <Text style={styles.notificationTime}>
-              {formatTimeAgo(item.notification_date)}
-            </Text>
-          </View>
-          
-          {!item.is_read && <View style={styles.unreadDot} />}
-        </TouchableOpacity>
-      </Animated.View>
+      <TouchableOpacity
+        style={[
+          styles.notificationItem,
+          !item.isRead && styles.notificationItemUnread
+        ]}
+        onPress={() => handleNotificationPress(item)}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.notificationIcon, { backgroundColor: icon.bg }]}>
+          <MaterialIcons name={icon.name as any} size={22} color={icon.color} />
+        </View>
+        
+        <View style={styles.notificationContent}>
+          <Text style={[
+            styles.notificationText,
+            !item.isRead && styles.notificationTextUnread
+          ]}>
+            {item.message}
+          </Text>
+          <Text style={styles.notificationTime}>
+            {formatTimeAgo(item.createdAt)}
+          </Text>
+        </View>
+        
+        {!item.isRead && <View style={styles.unreadDot} />}
+      </TouchableOpacity>
     );
   };
 
@@ -241,7 +258,7 @@ export default function NotificationsScreen() {
     );
   }
 
-  const unreadCount = notifications.filter(n => !n.is_read).length;
+  const unreadCount = notifications.filter(n => !n.isRead).length;
   const filteredNotifications = getFilteredNotifications();
 
   return (
@@ -309,7 +326,7 @@ export default function NotificationsScreen() {
         <FlatList
           data={filteredNotifications}
           renderItem={renderNotification}
-          keyExtractor={(item) => item.notification_id.toString()}
+          keyExtractor={(item) => item.id.toString()}
           refreshControl={
             <RefreshControl 
               refreshing={refreshing} 

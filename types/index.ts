@@ -136,12 +136,27 @@ export interface User {
   posts_count?: number;
 }
 
+// Notification interface matching NOTIFICATIONS.md backend spec
 export interface Notification {
-  notification_id: number;
-  user_id: string;
-  notification_text: string;
-  notification_date: string;
-  is_read: boolean;
+  id: number;
+  userID: string; // Username, not UUID
+  message: string;
+  type?: string; // comment, follow, subscription, post_approved, post_rejected, etc.
+  isRead: boolean;
+  createdAt: string;
+  // Legacy fields for backward compatibility
+  notification_id?: number;
+  user_id?: string;
+  notification_text?: string;
+  notification_date?: string;
+  is_read?: boolean;
+  // Additional fields that might be present
+  related_post_id?: string;
+  related_user_id?: string;
+  related_user?: {
+    username?: string;
+    profile_picture?: string;
+  };
 }
 
 export interface NotificationResponse {

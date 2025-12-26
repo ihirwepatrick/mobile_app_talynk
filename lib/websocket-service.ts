@@ -33,11 +33,15 @@ export interface CommentUpdate {
 
 export interface NotificationUpdate {
   notification: {
-    id: string;
-    type: string;
-    text: string;
-    isRead: boolean;
-    createdAt: string;
+    id: number | string;
+    userID?: string;
+    type?: string;
+    message?: string; // Backend sends 'message'
+    text?: string; // Legacy support
+    isRead?: boolean;
+    is_read?: boolean; // Legacy support
+    createdAt?: string;
+    created_at?: string; // Legacy support
   };
 }
 
@@ -220,7 +224,11 @@ class WebSocketService extends SimpleEventEmitter {
 
       case 'notification':
       case 'newNotification':
-        this.emit('newNotification', data as NotificationUpdate);
+        // Handle both formats from NOTIFICATIONS.md:
+        // Format 1: { type: "newNotification", data: { notification: {...} } }
+        // Format 2: { type: "notification", data: { notification: {...} } }
+        const notificationData = (data as any).notification || data;
+        this.emit('newNotification', { notification: notificationData } as NotificationUpdate);
         break;
 
       case 'follow':

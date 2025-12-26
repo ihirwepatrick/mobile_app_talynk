@@ -718,8 +718,12 @@ export const userApi = {
   },
 };
 
-// Notifications API
+// Notifications API - Matches NOTIFICATIONS.md spec
 export const notificationsApi = {
+  /**
+   * Get all notifications for the authenticated user
+   * GET /api/user/notifications
+   */
   getAll: async (): Promise<ApiResponse<{ notifications: Notification[] }>> => {
     try {
       const response = await apiClient.get('/api/user/notifications');
@@ -727,33 +731,41 @@ export const notificationsApi = {
     } catch (error: any) {
       return {
         status: 'error',
-        message: 'Failed to fetch notifications',
+        message: error.response?.data?.message || 'Failed to fetch notifications',
         data: { notifications: [] },
       };
     }
   },
 
-  markAsRead: async (notificationId: number): Promise<ApiResponse<any>> => {
+  /**
+   * Toggle notification settings
+   * PUT /api/user/notifications
+   */
+  toggleSettings: async (enabled: boolean): Promise<ApiResponse<any>> => {
     try {
-      const response = await apiClient.post(`/api/user/notifications/${notificationId}/read`);
+      const response = await apiClient.put('/api/user/notifications', { enabled });
       return response.data;
     } catch (error: any) {
       return {
         status: 'error',
-        message: 'Failed to mark notification as read',
+        message: error.response?.data?.message || 'Failed to update notification settings',
         data: {},
       };
     }
   },
 
+  /**
+   * Mark all notifications as read
+   * PUT /api/user/notifications/read-all
+   */
   markAllAsRead: async (): Promise<ApiResponse<any>> => {
     try {
-      const response = await apiClient.post('/api/user/notifications/read-all');
+      const response = await apiClient.put('/api/user/notifications/read-all');
       return response.data;
     } catch (error: any) {
       return {
         status: 'error',
-        message: 'Failed to mark all notifications as read',
+        message: error.response?.data?.message || 'Failed to mark all notifications as read',
         data: {},
       };
     }
