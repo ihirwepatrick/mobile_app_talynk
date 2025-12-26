@@ -113,6 +113,7 @@ export default function CommentsModal({
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
   const isMounted = useRef(true);
+  const isFetchingRef = useRef(false);
   
   // Animation values
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
@@ -188,9 +189,12 @@ export default function CommentsModal({
       setCurrentPage(1);
       setHasMore(true);
       setError(null);
-      fetchComments(1, true);
+      // Only fetch if we have a postId and modal is opening
+      if (postId) {
+        fetchComments(1, true);
+      }
     }
-  }, [visible, postId]);
+  }, [visible, postId, fetchComments]);
 
   // Reset state when modal closes
   useEffect(() => {
@@ -237,8 +241,19 @@ export default function CommentsModal({
     });
   }, [onClose, slideAnim, fadeAnim]);
 
-  const fetchComments = async (page = 1, isInitial = false) => {
+  const fetchComments = useCallback(async (page = 1, isInitial = false) => {
     if (!postId || !isMounted.current) return;
+    
+    // Prevent duplicate fetches with ref
+    if (isFetchingRef.current) {
+      return;
+    }
+    
+    // Also check loading states
+    if (isInitial && loading) return;
+    if (!isInitial && loadingMore) return;
+    
+    isFetchingRef.current = true;
     
     try {
       if (isInitial) {
@@ -248,9 +263,7 @@ export default function CommentsModal({
       }
       setError(null);
       
-      console.log('[Comments] Fetching comments for post:', postId, 'page:', page);
       const response = await postsApi.getComments(postId, page, 20);
-      console.log('[Comments] Response:', JSON.stringify(response, null, 2));
       
       if (!isMounted.current) return;
       
@@ -264,19 +277,39 @@ export default function CommentsModal({
           newComments = response.data;
         }
         
-        console.log('[Comments] Parsed comments count:', newComments.length);
-        
         const pagination = response.data?.pagination || {};
-        const hasMoreData = pagination.hasNextPage !== false && newComments.length === 20;
+        const currentPage = pagination.page || page;
+        const totalPages = pagination.totalPages || 1;
+        
+        // Calculate hasMore correctly: if current page < total pages, or if we got a full page of results
+        const hasMoreData = currentPage < totalPages || (newComments.length === 20 && totalPages > currentPage);
         setHasMore(hasMoreData);
         
         if (page === 1 || isInitial) {
+          // Ensure we have valid comments array - don't filter, just validate structure
           setComments(newComments);
+          console.log('[Comments] Set comments:', newComments.length);
+          if (newComments.length > 0) {
+            console.log('[Comments] Sample comment structure:', {
+              id: newComments[0].id,
+              comment_text: newComments[0].comment_text?.substring(0, 20),
+              user: newComments[0].user?.username,
+            });
+          }
         } else {
-          setComments(prev => [...prev, ...newComments]);
+          // Deduplicate comments by ID
+          setComments(prev => {
+            const existingIds = new Set(prev.map(c => c.id || c.comment_id));
+            const uniqueNew = newComments.filter(c => {
+              const id = c.id || c.comment_id;
+              return id && !existingIds.has(id);
+            });
+            const updated = [...prev, ...uniqueNew];
+            console.log('[Comments] Updated comments:', updated.length);
+            return updated;
+          });
         }
       } else {
-        console.log('[Comments] Response not success:', response.status, response.message);
         if (page === 1) setComments([]);
         setHasMore(false);
       }
@@ -287,12 +320,13 @@ export default function CommentsModal({
       if (page === 1) setComments([]);
       setHasMore(false);
     } finally {
+      isFetchingRef.current = false;
       if (isMounted.current) {
         setLoading(false);
         setLoadingMore(false);
       }
     }
-  };
+  }, [postId, loading, loadingMore]);
 
   const loadMoreComments = () => {
     if (!loadingMore && hasMore && !loading) {
@@ -516,7 +550,12 @@ export default function CommentsModal({
     }, 300);
   };
 
-  const renderComment = ({ item }: { item: Comment }) => {
+  const renderComment = useCallback(({ item }: { item: Comment }) => {
+    if (!item) {
+      console.warn('[Comments] renderComment: item is null/undefined');
+      return <View style={{ height: 1 }} />;
+    }
+    
     const commentUser = item.user || item.User || {};
     const commentContent = item.content || item.comment_text || '';
     const commentDate = item.createdAt || item.created_at || item.comment_date || '';
@@ -581,7 +620,7 @@ export default function CommentsModal({
         </View>
       </View>
     );
-  };
+  }, [user]);
 
   // Android Options Modal
   const renderOptionsModal = () => {
@@ -800,21 +839,26 @@ export default function CommentsModal({
               ref={flatListRef}
               data={comments}
               renderItem={renderComment}
-              keyExtractor={(item, index) => 
-                item.comment_id?.toString() || 
-                item.id?.toString() || 
-                `comment-${index}`
-              }
+              keyExtractor={(item, index) => {
+                // Use id first (from API), then comment_id, then fallback to index
+                const id = item.id || item.comment_id;
+                const key = id ? id.toString() : `comment-${index}`;
+                return key;
+              }}
               style={styles.commentsList}
               contentContainerStyle={[
                 styles.commentsContent,
-                comments.length === 0 && styles.commentsContentEmpty
+                comments.length === 0 && !loading && !error && styles.commentsContentEmpty
               ]}
-              showsVerticalScrollIndicator={false}
+              showsVerticalScrollIndicator={true}
               onEndReached={loadMoreComments}
               onEndReachedThreshold={0.5}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
+              removeClippedSubviews={false}
+              extraData={comments}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
               ListEmptyComponent={
                 loading ? (
                   <View style={styles.centerContainer}>
@@ -967,6 +1011,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 16,
     elevation: 24,
+    flex: 1,
+    minHeight: 400,
   },
   handleContainer: {
     alignItems: 'center',
@@ -1040,6 +1086,7 @@ const styles = StyleSheet.create({
   commentItem: {
     flexDirection: 'row',
     marginBottom: 16,
+    minHeight: 50,
   },
   commentAvatar: {
     width: 36,
