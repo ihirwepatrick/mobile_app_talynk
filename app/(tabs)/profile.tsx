@@ -59,10 +59,16 @@ const VideoThumbnail = ({ post, isActive, onPress }: VideoThumbnailProps) => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
   
-  const thumbnailUrl = post.image || (post as any).thumbnail || '';
-  const videoUrl = post.video_url || '';
+  // Get the best available thumbnail/image URL
+  const thumbnailUrl = (post as any).thumbnail_url || post.image || (post as any).thumbnail || '';
+  const videoUrl = post.video_url || post.videoUrl || '';
   const isVideo = !!videoUrl;
-  const previewUrl = isVideo ? (thumbnailUrl || videoUrl) : (post.image || '');
+  
+  // For videos: prefer thumbnail_url, fallback to image, then video_url
+  // For images: use image directly
+  const staticThumbnailUrl = isVideo 
+    ? (thumbnailUrl || post.image || videoUrl)
+    : (post.image || post.imageUrl || post.fullUrl || '');
 
   useEffect(() => {
     if (isActive && isVideo && videoUrl) {
@@ -74,6 +80,10 @@ const VideoThumbnail = ({ post, isActive, onPress }: VideoThumbnailProps) => {
     } else {
       setShowVideo(false);
       setIsLoaded(false);
+      // Stop video when not active
+      if (videoRef.current) {
+        videoRef.current.pauseAsync().catch(() => {});
+      }
     }
   }, [isActive, isVideo, videoUrl]);
 
@@ -93,21 +103,21 @@ const VideoThumbnail = ({ post, isActive, onPress }: VideoThumbnailProps) => {
       onPress={onPress}
       activeOpacity={0.9}
     >
-      {/* Base thumbnail image */}
-      {previewUrl ? (
+      {/* Static thumbnail image - always visible in background */}
+      {staticThumbnailUrl ? (
         <Image 
-          source={{ uri: previewUrl }} 
+          source={{ uri: staticThumbnailUrl }} 
           style={styles.postMedia}
           resizeMode="cover"
         />
       ) : (
         <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
-          <MaterialIcons name="video-library" size={28} color="#444" />
+          <MaterialIcons name={isVideo ? "video-library" : "image"} size={28} color="#444" />
         </View>
       )}
 
-      {/* Video teaser overlay */}
-      {showVideo && isVideo && videoUrl && (
+      {/* Video teaser overlay - only when active */}
+      {showVideo && isVideo && videoUrl && isActive && (
         <Video
           ref={videoRef}
           source={{ uri: videoUrl }}
