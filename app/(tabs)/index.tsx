@@ -364,13 +364,18 @@ const PostItem: React.FC<PostItemProps> = ({
       {/* Media */}
       <View style={[styles.mediaContainer, { height: availableHeight }]}>
         {isVideo ? (
-          videoError ? (
-            <View style={styles.mediaWrapper}>
+          videoError || !isActive ? (
+            // Show thumbnail when video has error OR when not active (memory optimization)
+            <TouchableOpacity 
+              style={styles.mediaWrapper} 
+              activeOpacity={1} 
+              onPress={handleVideoTap}
+            >
               {mediaUrl ? (
                 <Image
-                  source={{ uri: mediaUrl }}
+                  source={{ uri: item.thumbnail_url || mediaUrl }}
                   style={styles.media}
-                  resizeMode="contain"
+                  resizeMode="cover"
                   onError={() => {
                     setImageError(true);
                   }}
@@ -381,8 +386,17 @@ const PostItem: React.FC<PostItemProps> = ({
                   <Text style={styles.placeholderText}>Video unavailable</Text>
                 </View>
               )}
-            </View>
+              {/* Play icon overlay for inactive videos */}
+              {!videoError && !isActive && (
+                <View style={styles.playIconOverlay}>
+                  <View style={styles.playIconCircle}>
+                    <Feather name="play" size={32} color="#fff" />
+                  </View>
+                </View>
+              )}
+            </TouchableOpacity>
           ) : (
+            // Only load Video component when active
             <TouchableOpacity 
               style={styles.mediaWrapper} 
               activeOpacity={1} 
@@ -393,7 +407,7 @@ const PostItem: React.FC<PostItemProps> = ({
                 source={{ uri: mediaUrl || '' }}
                 style={styles.media}
                 resizeMode={ResizeMode.COVER}
-                shouldPlay={useNativeControls ? false : (isActive && !decoderErrorDetected)}
+                shouldPlay={useNativeControls ? false : !decoderErrorDetected}
                 isLooping={!useNativeControls}
                 isMuted={useNativeControls ? false : isMuted}
                 usePoster={false}
@@ -401,8 +415,7 @@ const PostItem: React.FC<PostItemProps> = ({
                 volume={useNativeControls ? 1.0 : (isMuted ? 0.0 : 1.0)}
                 onLoad={() => {
                   setVideoLoaded(true);
-                  // Auto-play if active
-                  if (isActive && !useNativeControls && videoRef.current) {
+                  if (!useNativeControls && videoRef.current) {
                     pauseAllVideosExcept(videoRef.current).then(() => {
                       videoRef.current?.playAsync().catch(() => {});
                     });
@@ -412,7 +425,6 @@ const PostItem: React.FC<PostItemProps> = ({
                   if (!decoderErrorDetected) {
                     const errorMessage = error?.message || error?.toString() || '';
                     if (errorMessage.includes('Decoder') || errorMessage.includes('decoder') || errorMessage.includes('OMX')) {
-                      // Decoder error - switch to native controls
                       setDecoderErrorDetected(true);
                       setUseNativeControls(true);
                       setVideoError(false);
@@ -423,13 +435,12 @@ const PostItem: React.FC<PostItemProps> = ({
                   }
                 }}
                 useNativeControls={useNativeControls}
-                progressUpdateIntervalMillis={100}
+                progressUpdateIntervalMillis={500}
                 onPlaybackStatusUpdate={(status: any) => {
                   if (status.isLoaded && !useNativeControls) {
                     if (status.isPlaying !== isPlaying) {
                       setIsPlaying(status.isPlaying);
                     }
-                    // Update progress
                     if (status.durationMillis && status.positionMillis !== undefined) {
                       const progress = status.durationMillis > 0 
                         ? status.positionMillis / status.durationMillis 
@@ -988,10 +999,10 @@ export default function FeedScreen() {
           style={{ marginTop: headerHeight }}
           contentContainerStyle={{ paddingBottom: 0 }}
           // Lazy loading optimizations for better performance
-          windowSize={3}
-          initialNumToRender={2}
-          maxToRenderPerBatch={2}
-          updateCellsBatchingPeriod={50}
+          windowSize={2}
+          initialNumToRender={1}
+          maxToRenderPerBatch={1}
+          updateCellsBatchingPeriod={100}
           removeClippedSubviews={true}
           getItemLayout={(data, index) => ({
             length: availableHeight,
@@ -1298,6 +1309,21 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 14,
     marginTop: 12,
+  },
+  playIconOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  playIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingLeft: 4,
   },
   progressBarContainer: {
     position: 'absolute',

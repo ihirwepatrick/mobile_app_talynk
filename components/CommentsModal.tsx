@@ -248,13 +248,25 @@ export default function CommentsModal({
       }
       setError(null);
       
+      console.log('[Comments] Fetching comments for post:', postId, 'page:', page);
       const response = await postsApi.getComments(postId, page, 20);
+      console.log('[Comments] Response:', JSON.stringify(response, null, 2));
       
       if (!isMounted.current) return;
       
-      if (response.status === 'success' && response.data?.comments) {
-        const newComments = Array.isArray(response.data.comments) ? response.data.comments : [];
-        const pagination = response.data.pagination || {};
+      if (response.status === 'success') {
+        // Handle different response structures
+        let newComments: any[] = [];
+        
+        if (response.data?.comments) {
+          newComments = Array.isArray(response.data.comments) ? response.data.comments : [];
+        } else if (Array.isArray(response.data)) {
+          newComments = response.data;
+        }
+        
+        console.log('[Comments] Parsed comments count:', newComments.length);
+        
+        const pagination = response.data?.pagination || {};
         const hasMoreData = pagination.hasNextPage !== false && newComments.length === 20;
         setHasMore(hasMoreData);
         
@@ -264,12 +276,13 @@ export default function CommentsModal({
           setComments(prev => [...prev, ...newComments]);
         }
       } else {
+        console.log('[Comments] Response not success:', response.status, response.message);
         if (page === 1) setComments([]);
         setHasMore(false);
       }
     } catch (error: any) {
       if (!isMounted.current) return;
-      console.error('Error fetching comments:', error);
+      console.error('[Comments] Error fetching:', error);
       setError('Failed to load comments');
       if (page === 1) setComments([]);
       setHasMore(false);
