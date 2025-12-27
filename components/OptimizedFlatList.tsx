@@ -274,3 +274,5 @@ export const OptimizedFlatList = memo(OptimizedFlatListComponent) as typeof Opti
 export default OptimizedFlatList;
 
 
+
+

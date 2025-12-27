@@ -597,7 +597,7 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
 
   const LIMIT = 20;
 
-  const loadPosts = async (page = 1, refresh = false) => {
+  const loadPosts = useCallback(async (page = 1, refresh = false) => {
     try {
       if (refresh) {
         setRefreshing(true);
@@ -665,17 +665,24 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
         }
         
         if (page === 1 || refresh) {
-          setPosts(postsArray);
+          // Ensure posts are in correct order (newest first typically)
+          const sortedPosts = [...postsArray].sort((a, b) => {
+            const dateA = new Date(a.createdAt || a.uploadDate || 0).getTime();
+            const dateB = new Date(b.createdAt || b.uploadDate || 0).getTime();
+            return dateB - dateA; // Newest first
+          });
+          
+          setPosts(sortedPosts);
           
           // Get username from first post
-          if (postsArray.length > 0 && postsArray[0].user?.username) {
-            setUsername(postsArray[0].user.username);
+          if (sortedPosts.length > 0 && sortedPosts[0].user?.username) {
+            setUsername(sortedPosts[0].user.username);
           }
           
           // Scroll to initial post if provided
           if (initialPostId && !initialScrollDone) {
-            const initialIndex = postsArray.findIndex((p: Post) => p.id === initialPostId);
-            if (initialIndex > 0) {
+            const initialIndex = sortedPosts.findIndex((p: Post) => p.id === initialPostId);
+            if (initialIndex >= 0) {
               setTimeout(() => {
                 flatListRef.current?.scrollToIndex({ index: initialIndex, animated: false });
                 setCurrentIndex(initialIndex);
@@ -688,7 +695,12 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
             setInitialScrollDone(true);
           }
         } else {
-          setPosts(prev => [...prev, ...postsArray]);
+          // Deduplicate when appending
+          setPosts(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const newPosts = postsArray.filter(p => p.id && !existingIds.has(p.id));
+            return [...prev, ...newPosts];
+          });
         }
       } else {
         if (page === 1) {
@@ -707,21 +719,28 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
       setRefreshing(false);
       setLoadingMore(false);
     }
-  };
+  }, [userId, status, user, dispatch, syncLikedPostsFromServer, initialPostId, initialScrollDone]);
 
-  const loadMorePosts = () => {
+  const loadMorePosts = useCallback(() => {
     if (!loadingMore && hasMore && !loading) {
       const nextPage = currentPage + 1;
       setCurrentPage(nextPage);
       loadPosts(nextPage, false);
     }
-  };
+  }, [loadPosts, loadingMore, hasMore, loading, currentPage]);
 
   useEffect(() => {
     if (userId) {
       loadPosts(1, false);
     }
   }, [userId, status]);
+
+  // Track current index with ref to avoid infinite loops
+  const currentIndexRef = useRef(0);
+  
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
 
   useFocusEffect(
     useCallback(() => {
@@ -730,12 +749,12 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
         setCurrentIndex(lastActiveIndexRef.current);
       }
       return () => {
-        const savedIndex = currentIndex;
+        // Use ref to avoid dependency issues
         setIsScreenFocused(false);
-        lastActiveIndexRef.current = savedIndex;
+        lastActiveIndexRef.current = currentIndexRef.current;
         pauseAllVideosExcept(null);
       };
-    }, [currentIndex])
+    }, []) // Empty dependency array - only run on focus/blur
   );
 
   const onRefresh = () => {
@@ -878,7 +897,10 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
               availableHeight={availableHeight}
             />
           )}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item, index) => {
+            // Ensure unique keys - use id if available, fallback to index
+            return item.id ? `post-${item.id}` : `post-${index}`;
+          }}
           pagingEnabled
           showsVerticalScrollIndicator={false}
           snapToInterval={availableHeight}
@@ -890,12 +912,12 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
           maxToRenderPerBatch={1}
           updateCellsBatchingPeriod={100}
           removeClippedSubviews={true}
-          maintainVisibleContentPosition={null}
           getItemLayout={(data, index) => ({
             length: availableHeight,
             offset: availableHeight * index,
             index,
           })}
+          extraData={posts.length}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

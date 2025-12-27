@@ -27,6 +27,7 @@ import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
@@ -52,22 +53,31 @@ interface VideoThumbnailProps {
   post: Post;
   isActive: boolean;
   onPress: () => void;
+  onOptionsPress?: () => void;
 }
 
-const VideoThumbnail = ({ post, isActive, onPress }: VideoThumbnailProps) => {
+const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress }: VideoThumbnailProps) => {
   const videoRef = useRef<Video>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
   
-  // Get the best available thumbnail/image URL
-  const thumbnailUrl = (post as any).thumbnail_url || post.image || (post as any).thumbnail || '';
   const videoUrl = post.video_url || post.videoUrl || '';
   const isVideo = !!videoUrl;
   
-  // For videos: prefer thumbnail_url, fallback to image, then video_url
+  // Get fallback image URL
+  const fallbackImageUrl = (post as any).thumbnail_url || post.image || (post as any).thumbnail || '';
+  
+  // Generate thumbnail for videos, use image directly for non-videos
+  const generatedThumbnail = useVideoThumbnail(
+    isVideo ? videoUrl : null,
+    fallbackImageUrl,
+    1000 // Extract thumbnail at 1 second
+  );
+  
+  // For videos: use generated thumbnail, fallback to provided image
   // For images: use image directly
   const staticThumbnailUrl = isVideo 
-    ? (thumbnailUrl || post.image || videoUrl)
+    ? (generatedThumbnail || fallbackImageUrl)
     : (post.image || post.imageUrl || post.fullUrl || '');
 
   useEffect(() => {
@@ -101,6 +111,7 @@ const VideoThumbnail = ({ post, isActive, onPress }: VideoThumbnailProps) => {
     <TouchableOpacity 
       style={styles.postItem}
       onPress={onPress}
+      onLongPress={onOptionsPress}
       activeOpacity={0.9}
     >
       {/* Static thumbnail image - always visible in background */}
@@ -109,10 +120,20 @@ const VideoThumbnail = ({ post, isActive, onPress }: VideoThumbnailProps) => {
           source={{ uri: staticThumbnailUrl }} 
           style={styles.postMedia}
           resizeMode="cover"
+          onError={() => {
+            // If generated thumbnail fails, fallback to provided image
+            if (isVideo && fallbackImageUrl && staticThumbnailUrl !== fallbackImageUrl) {
+              // This will be handled by the hook's fallback
+            }
+          }}
         />
       ) : (
         <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
-          <MaterialIcons name={isVideo ? "video-library" : "image"} size={28} color="#444" />
+          {isVideo && !staticThumbnailUrl ? (
+            <ActivityIndicator size="small" color="#60a5fa" />
+          ) : (
+            <MaterialIcons name={isVideo ? "video-library" : "image"} size={28} color="#444" />
+          )}
         </View>
       )}
 
@@ -163,6 +184,20 @@ const VideoThumbnail = ({ post, isActive, onPress }: VideoThumbnailProps) => {
             <Feather name="play" size={14} color="#fff" />
           )}
         </View>
+      )}
+      
+      {/* Options button (3 dots) */}
+      {onOptionsPress && (
+        <TouchableOpacity
+          style={styles.postOptionsButton}
+          onPress={(e) => {
+            e.stopPropagation();
+            onOptionsPress();
+          }}
+          activeOpacity={0.7}
+        >
+          <Feather name="more-vertical" size={16} color="#fff" />
+        </TouchableOpacity>
       )}
     </TouchableOpacity>
   );
@@ -220,7 +255,7 @@ export default function ProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
-  const [postModalVisible, setPostModalVisible] = useState(false);
+  const [postOptionsModalVisible, setPostOptionsModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [totalLikes, setTotalLikes] = useState(0);
   const [videoRef, setVideoRef] = useState<Video | null>(null);
@@ -239,7 +274,7 @@ export default function ProfileScreen() {
   // Video teaser playback state
   const [activeTeaserIndex, setActiveTeaserIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
-  const teaserIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const teaserIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   const insets = useSafeAreaInsets();
 
@@ -298,13 +333,6 @@ export default function ProfileScreen() {
     loadPosts();
   }, [user, activeTab]);
 
-  // Cleanup video when modal closes
-  useEffect(() => {
-    if (!postModalVisible && videoRef && isVideoPlaying) {
-      videoRef.pauseAsync().catch(() => {});
-      resetVideoState();
-    }
-  }, [postModalVisible]);
 
   const loadProfile = async (showLoading = false) => {
     try {
@@ -603,7 +631,8 @@ export default function ProfileScreen() {
           try {
             await postsApi.deletePost(postId);
             setPosts(prev => prev.filter(p => p.id !== postId));
-            setPostModalVisible(false);
+            setPostOptionsModalVisible(false);
+            setSelectedPost(null);
           } catch (error) {
             Alert.alert('Error', 'Failed to delete post');
           }
@@ -629,6 +658,11 @@ export default function ProfileScreen() {
               status: activeTab 
             }
           });
+        }}
+        onOptionsPress={() => {
+          // Open options modal when 3 dots is clicked
+          setSelectedPost(item);
+          setPostOptionsModalVisible(true);
         }}
       />
     );
@@ -830,110 +864,90 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Post Detail Modal */}
-      <Modal visible={postModalVisible} transparent animationType="slide">
-        <View style={styles.postModalOverlay}>
-          <View style={styles.postModalContainer}>
-            <TouchableOpacity 
-              style={styles.postModalClose}
-              onPress={() => {
-                if (videoRef && isVideoPlaying) {
-                  videoRef.pauseAsync();
-                }
-                setPostModalVisible(false);
-                resetVideoState();
-              }}
-            >
-              <MaterialIcons name="close" size={24} color="#fff" />
-            </TouchableOpacity>
-            
+      {/* Post Options Modal */}
+      <Modal visible={postOptionsModalVisible} transparent animationType="slide">
+        <TouchableOpacity 
+          style={styles.menuOverlay} 
+          onPress={() => setPostOptionsModalVisible(false)}
+          activeOpacity={1}
+        >
+          <View style={styles.menuContainer}>
+            {/* Post Preview */}
             {selectedPost && (
-              <>
-                {/* Media */}
-                <View style={styles.postModalMedia}>
-                  {selectedPost.video_url && selectedPost.video_url.trim() ? (
-                    videoError && !useNativeControls ? (
-                      <View style={styles.videoErrorContainer}>
-                        <MaterialIcons name="error-outline" size={48} color="#666" />
-                        <Text style={styles.videoErrorText}>Video failed to load</Text>
-                        <TouchableOpacity 
-                          style={styles.retryButton}
-                          onPress={() => {
-                            setVideoError(false);
-                            setUseNativeControls(true);
-                            setDecoderErrorDetected(true);
-                            resetVideoState();
-                          }}
-                        >
-                          <Text style={styles.retryButtonText}>Use Native Player</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : (
-                      <View style={styles.videoContainer}>
-                        <Video
-                          ref={setVideoRef}
-                          source={{ 
-                            uri: selectedPost.video_url.trim(),
-                            headers: {
-                              'User-Agent': 'Talynk-Mobile-App'
-                            }
-                          }}
-                          style={styles.modalMedia}
-                          resizeMode={ResizeMode.CONTAIN}
-                          useNativeControls={true}
-                          shouldPlay={false}
-                          isLooping={false}
-                          isMuted={false}
-                          volume={1.0}
-                          rate={1.0}
-                          shouldCorrectPitch={true}
-                          progressUpdateIntervalMillis={1000}
-                          onLoad={handleVideoLoad}
-                          onError={handleVideoError}
-                          onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-                          posterSource={selectedPost.image && selectedPost.image.trim() ? { uri: selectedPost.image.trim() } : undefined}
-                          usePoster={!!selectedPost.image}
-                        />
-                      </View>
-                    )
-                  ) : selectedPost.image && selectedPost.image.trim() ? (
+              <View style={styles.postOptionsPreview}>
+                <View style={styles.postOptionsPreviewMedia}>
+                  {selectedPost.video_url ? (
+                    <View style={styles.postOptionsThumbnail}>
+                      <Feather name="video" size={24} color="#60a5fa" />
+                    </View>
+                  ) : selectedPost.image ? (
                     <Image 
-                      source={{ uri: selectedPost.image.trim() }} 
-                      style={styles.modalMedia} 
+                      source={{ uri: selectedPost.image }} 
+                      style={styles.postOptionsThumbnail}
+                      resizeMode="cover"
                     />
                   ) : (
-                    <View style={[styles.modalMedia, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
-                      <MaterialIcons name="broken-image" size={48} color="#666" />
-                      <Text style={styles.videoErrorText}>No media available</Text>
+                    <View style={styles.postOptionsThumbnail}>
+                      <MaterialIcons name="image" size={24} color="#666" />
                     </View>
                   )}
                 </View>
-                
-                {/* Actions */}
-                <View style={styles.postModalActions}>
-                  <TouchableOpacity 
-                    style={styles.modalActionButton}
-                    onPress={() => Share.share({
-                      message: selectedPost.caption || '',
-                      url: selectedPost.video_url || selectedPost.image || '',
-                    })}
-                  >
-                    <Feather name="share" size={20} color="#fff" />
-                    <Text style={styles.modalActionText}>Share</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={[styles.modalActionButton, styles.modalActionButtonDanger]}
-                    onPress={() => handleDeletePost(selectedPost.id)}
-                  >
-                    <Feather name="trash-2" size={20} color="#ef4444" />
-                    <Text style={[styles.modalActionText, { color: '#ef4444' }]}>Delete</Text>
-                  </TouchableOpacity>
+                <View style={styles.postOptionsInfo}>
+                  <Text style={styles.postOptionsCaption} numberOfLines={2}>
+                    {selectedPost.caption || selectedPost.description || selectedPost.title || 'No caption'}
+                  </Text>
+                  <View style={styles.postOptionsStats}>
+                    <Text style={styles.postOptionsStatText}>
+                      {formatNumber(selectedPost.likes || 0)} likes
+                    </Text>
+                    <Text style={styles.postOptionsStatText}>
+                      • {formatNumber(selectedPost.comments_count || 0)} comments
+                    </Text>
+                  </View>
                 </View>
-              </>
+              </View>
             )}
+            
+            <View style={styles.menuDivider} />
+            
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => {
+                setPostOptionsModalVisible(false);
+                if (selectedPost) {
+                  Share.share({
+                    message: selectedPost.caption || selectedPost.description || '',
+                    url: selectedPost.video_url || selectedPost.image || '',
+                  });
+                }
+              }}
+            >
+              <Feather name="share" size={20} color="#fff" />
+              <Text style={styles.menuItemText}>Share Post</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.menuItem, styles.menuItemDanger]}
+              onPress={() => {
+                setPostOptionsModalVisible(false);
+                if (selectedPost) {
+                  handleDeletePost(selectedPost.id);
+                }
+              }}
+            >
+              <Feather name="trash-2" size={20} color="#ef4444" />
+              <Text style={[styles.menuItemText, { color: '#ef4444' }]}>Delete Post</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => setPostOptionsModalVisible(false)}
+            >
+              <Feather name="x" size={20} color="#fff" />
+              <Text style={styles.menuItemText}>Cancel</Text>
+            </TouchableOpacity>
           </View>
-        </View>
+        </TouchableOpacity>
       </Modal>
 
       {/* Edit Profile Modal */}
@@ -1145,6 +1159,18 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#fff',
   },
+  postOptionsButton: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 12,
+    padding: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 28,
+    minHeight: 28,
+  },
   teaserVideo: {
     position: 'absolute',
     top: 0,
@@ -1197,6 +1223,49 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 16,
+    paddingBottom: 32,
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginVertical: 8,
+  },
+  postOptionsPreview: {
+    flexDirection: 'row',
+    padding: 12,
+    backgroundColor: '#232326',
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  postOptionsPreviewMedia: {
+    marginRight: 12,
+  },
+  postOptionsThumbnail: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  postOptionsInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  postOptionsCaption: {
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 6,
+    lineHeight: 18,
+  },
+  postOptionsStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  postOptionsStatText: {
+    color: '#999',
+    fontSize: 12,
   },
   menuItem: {
     flexDirection: 'row',
@@ -1223,6 +1292,7 @@ const styles = StyleSheet.create({
   },
   postModalContainer: {
     width: '90%',
+    maxHeight: '90%',
     backgroundColor: '#18181b',
     borderRadius: 20,
     padding: 16,
@@ -1247,6 +1317,29 @@ const styles = StyleSheet.create({
   modalMedia: {
     width: '100%',
     height: '100%',
+  },
+  postModalInfo: {
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  postModalCaption: {
+    color: '#fff',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  postModalStats: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  postModalStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  postModalStatText: {
+    color: '#999',
+    fontSize: 12,
   },
   postModalActions: {
     flexDirection: 'row',

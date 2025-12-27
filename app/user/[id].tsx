@@ -27,6 +27,7 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import DotsSpinner from '@/components/DotsSpinner';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_CARD_WIDTH = (screenWidth - 48) / 2; // 2 columns with padding
@@ -61,15 +62,23 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
   const videoRef = useRef<Video>(null);
   const [showVideo, setShowVideo] = useState(false);
   
-  // Get the best available thumbnail/image URL
-  const thumbnailUrl = (post as any).thumbnail_url || post.image || (post as any).thumbnail || '';
   const videoUrl = post.video_url || post.videoUrl || '';
   const isVideo = !!videoUrl;
   
-  // For videos: prefer thumbnail_url, fallback to image, then video_url
+  // Get fallback image URL
+  const fallbackImageUrl = (post as any).thumbnail_url || post.image || (post as any).thumbnail || '';
+  
+  // Generate thumbnail for videos, use image directly for non-videos
+  const generatedThumbnail = useVideoThumbnail(
+    isVideo ? videoUrl : null,
+    fallbackImageUrl,
+    1000 // Extract thumbnail at 1 second
+  );
+  
+  // For videos: use generated thumbnail, fallback to provided image
   // For images: use image directly
   const staticThumbnailUrl = isVideo 
-    ? (thumbnailUrl || post.image || videoUrl)
+    ? (generatedThumbnail || fallbackImageUrl)
     : (post.image || post.imageUrl || post.fullUrl || '');
 
   useEffect(() => {
@@ -104,11 +113,21 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
           <Image 
             source={{ uri: staticThumbnailUrl }} 
             style={styles.postImage} 
-            resizeMode="cover" 
+            resizeMode="cover"
+            onError={() => {
+              // If generated thumbnail fails, fallback to provided image
+              if (isVideo && fallbackImageUrl && staticThumbnailUrl !== fallbackImageUrl) {
+                // This will be handled by the hook's fallback
+              }
+            }}
           />
         ) : (
           <View style={[styles.postImage, styles.noMediaPlaceholder]}>
-            <MaterialIcons name={isVideo ? "video-library" : "image"} size={32} color="#444" />
+            {isVideo && !staticThumbnailUrl ? (
+              <ActivityIndicator size="small" color="#60a5fa" />
+            ) : (
+              <MaterialIcons name={isVideo ? "video-library" : "image"} size={32} color="#444" />
+            )}
           </View>
         )}
         
