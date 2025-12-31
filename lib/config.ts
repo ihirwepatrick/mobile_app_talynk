@@ -6,7 +6,7 @@
  */
 
 // API URL with fallback for production
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.talentix.net';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.67:3000';
 
 // JWT Secret
 export const JWT_SECRET = process.env.JWT_SECRET || 'wUq9wpIDBRGr3n7KDw86GiV15gZlNEEK';

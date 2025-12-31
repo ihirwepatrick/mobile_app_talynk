@@ -235,10 +235,9 @@ const getStatusIcon = (status: string) => {
 };
 
 const PROFILE_TABS = [
-  { key: 'approved', label: 'Approved', icon: 'check-circle' },
-  { key: 'pending', label: 'Pending', icon: 'schedule' },
-  { key: 'rejected', label: 'Rejected', icon: 'cancel' },
-  { key: 'reported', label: 'Reported', icon: 'report' },
+  { key: 'approved', label: 'Active Posts', icon: 'check-circle' },
+  { key: 'draft', label: 'Drafts', icon: 'drafts' },
+  { key: 'rejected', label: 'Suspended', icon: 'cancel' },
 ];
 
 export default function ProfileScreen() {
@@ -379,20 +378,31 @@ export default function ProfileScreen() {
       setError(null);
       if (showLoading) setLoadingPosts(true);
       
-      const response = await userApi.getOwnPosts();
+      // Fetch drafts separately if draft tab is active
+      let response;
+      if (activeTab === 'draft') {
+        response = await postsApi.getDrafts(1, 100);
+        if (response.status === 'success' && response.data?.posts) {
+          setPosts(response.data.posts);
+          setTotalLikes(0); // Drafts don't have likes yet
+          return;
+        }
+      }
+      
+      response = await userApi.getOwnPosts();
       if (response.status === 'success' && response.data?.posts) {
         let filteredPosts = response.data.posts;
         
         // Filter by tab
         switch (activeTab) {
-          case 'pending':
-            filteredPosts = filteredPosts.filter((p: any) => p.status === 'pending');
+          case 'approved':
+            filteredPosts = filteredPosts.filter((p: any) => p.status === 'approved' || !p.status);
+            break;
+          case 'draft':
+            filteredPosts = filteredPosts.filter((p: any) => p.status === 'draft');
             break;
           case 'rejected':
-            filteredPosts = filteredPosts.filter((p: any) => p.status === 'rejected');
-            break;
-          case 'reported':
-            filteredPosts = filteredPosts.filter((p: any) => p.status === 'reported');
+            filteredPosts = filteredPosts.filter((p: any) => p.status === 'rejected' || p.status === 'reported');
             break;
           default:
             filteredPosts = filteredPosts.filter((p: any) => (p.status || 'approved') === 'approved');

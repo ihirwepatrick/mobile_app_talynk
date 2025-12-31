@@ -12,6 +12,8 @@ import {
   Platform,
   Dimensions,
   KeyboardAvoidingView,
+  Image,
+  Modal,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
@@ -27,6 +29,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { generateThumbnail } from '@/lib/utils/thumbnail';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Video, ResizeMode } from 'expo-av';
+import * as ImagePicker from 'expo-image-picker';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -122,6 +125,7 @@ export default function CreatePostScreen() {
   const [selectedGroup, setSelectedGroup] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [recordedVideoUri, setRecordedVideoUri] = useState<string | null>(null);
+  const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
   const [editedVideoUri, setEditedVideoUri] = useState<string | null>(null);
   const [thumbnailUri, setThumbnailUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -132,10 +136,12 @@ export default function CreatePostScreen() {
   const [editing, setEditing] = useState(false);
   const [hasOpenedCameraOnMount, setHasOpenedCameraOnMount] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [cameraMode, setCameraMode] = useState<'video' | 'picture'>('video');
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [showPostActionModal, setShowPostActionModal] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const C = COLORS.dark;
@@ -325,9 +331,20 @@ export default function CreatePostScreen() {
       }, 1000);
 
       // Start recording (this is async and will resolve when stopRecording is called)
-      const recordingPromise = cameraRef.current.recordAsync({
+      // Audio settings for better volume - ensure mute is false
+      const recordingOptions: any = {
         maxDuration: 150, // 2:30 minutes in seconds
-      });
+        mute: false, // CRITICAL: Ensure audio is not muted - this records audio at normal volume
+      };
+      
+      // Platform-specific options
+      if (Platform.OS === 'ios') {
+        recordingOptions.codec = 'h264';
+      } else {
+        recordingOptions.maxFileSize = 100 * 1024 * 1024; // 100MB max for Android
+      }
+      
+      const recordingPromise = cameraRef.current.recordAsync(recordingOptions);
       
       recordingPromise.then((video) => {
         // This will be called when recording stops
@@ -350,6 +367,7 @@ export default function CreatePostScreen() {
 
           setRecordedVideoUri(video.uri);
           setEditedVideoUri(null);
+          setCapturedImageUri(null); // Clear image when video is recorded
           
           // Generate thumbnail
           generateThumbnail(video.uri).then((thumb) => {
@@ -360,6 +378,7 @@ export default function CreatePostScreen() {
           
           setShowCamera(false);
           setRecordingDuration(0);
+          // Don't show modal - buttons will be in the form
         } else {
           Alert.alert('Error', 'Failed to save video. Please try again.');
           setShowCamera(false);
@@ -416,6 +435,31 @@ export default function CreatePostScreen() {
     }
   };
 
+  // --- IMAGE CAPTURE ---
+  const takePicture = async () => {
+    if (!cameraRef.current) return;
+
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        base64: false,
+      });
+
+      if (photo && photo.uri) {
+        setCapturedImageUri(photo.uri);
+        setRecordedVideoUri(null); // Clear video when image is captured
+        setEditedVideoUri(null);
+        setShowCamera(false);
+        // Don't show modal - buttons will be in the form
+      } else {
+        Alert.alert('Error', 'Failed to capture image. Please try again.');
+      }
+    } catch (error: any) {
+      console.error('Image capture error:', error);
+      Alert.alert('Error', 'Failed to capture image. Please try again.');
+    }
+  };
+
   // --- VIDEO EDITING --- (Re-record instead of edit)
   const handleEditVideo = async () => {
     // For now, just re-record
@@ -425,14 +469,27 @@ export default function CreatePostScreen() {
   // --- VALIDATION ---
   const validate = async () => {
     const newErrors: { [k: string]: string } = {};
-    if (!caption.trim()) newErrors.caption = 'Caption is required';
-    if (!selectedGroup) newErrors.group = 'Please select a category group';
-    if (!selectedCategoryId) newErrors.category = 'Please select a specific category';
-    if (!recordedVideoUri && !editedVideoUri) {
-      newErrors.media = 'Please record a video';
+    if (!caption.trim()) {
+      newErrors.caption = 'Caption is required';
+    }
+    if (!selectedGroup) {
+      newErrors.group = 'Please select a category group';
+    }
+    if (!selectedCategoryId) {
+      newErrors.category = 'Please select a specific category';
+    }
+    if (!recordedVideoUri && !editedVideoUri && !capturedImageUri) {
+      newErrors.media = 'Please record a video or take a picture';
     }
     
     setErrors(newErrors);
+    
+    // Show error alert if validation fails
+    if (Object.keys(newErrors).length > 0) {
+      const errorMessages = Object.values(newErrors).join('\n');
+      Alert.alert('Missing Required Information', errorMessages);
+    }
+    
     return Object.keys(newErrors).length === 0;
   };
 
@@ -441,20 +498,8 @@ export default function CreatePostScreen() {
     setCameraFacing(current => current === 'back' ? 'front' : 'back');
   };
 
-  // Handle video playback
-  const handlePlayPause = async () => {
-    if (videoRef.current) {
-      if (isVideoPlaying) {
-        await videoRef.current.pauseAsync();
-      } else {
-        await videoRef.current.playAsync();
-      }
-      setIsVideoPlaying(!isVideoPlaying);
-    }
-  };
-
   // --- SUBMIT ---
-  const handleCreatePost = async () => {
+  const handleCreatePost = async (status: 'pending' | 'draft' = 'pending') => {
     if (!isAuthenticated || !user) {
       Alert.alert(
         'Authentication Required',
@@ -473,8 +518,10 @@ export default function CreatePostScreen() {
     if (!isValid) return;
     
     const videoUri = editedVideoUri || recordedVideoUri;
-    if (!videoUri) {
-      Alert.alert('Error', 'No video to upload');
+    const imageUri = capturedImageUri;
+    
+    if (!videoUri && !imageUri) {
+      Alert.alert('Error', 'No media to upload');
       return;
     }
 
@@ -488,13 +535,19 @@ export default function CreatePostScreen() {
     setUploadProgress(0);
     
     try {
-      // Get file info
-      const fileInfo = await FileSystem.getInfoAsync(videoUri);
-      if (!fileInfo.exists) {
-        throw new Error('Video file not found');
+      const mediaUri = videoUri || imageUri;
+      if (!mediaUri) {
+        throw new Error('No media file to upload');
       }
 
-      const fileName = videoUri.split('/').pop() || 'video.mp4';
+      // Get file info
+      const fileInfo = await FileSystem.getInfoAsync(mediaUri);
+      if (!fileInfo.exists) {
+        throw new Error('Media file not found');
+      }
+
+      const fileName = mediaUri.split('/').pop() || (videoUri ? 'video.mp4' : 'image.jpg');
+      const fileType = videoUri ? 'video/mp4' : 'image/jpeg';
       
       const formData = new FormData();
       // Use first 50 chars of caption as title, or generate one
@@ -507,11 +560,12 @@ export default function CreatePostScreen() {
       
       formData.append('post_category', categoryName);
       formData.append('category_id', categoryId);
+      formData.append('status', status); // Add status (pending or draft)
       
       formData.append('file', {
-        uri: videoUri,
+        uri: mediaUri,
         name: fileName,
-        type: 'video/mp4',
+        type: fileType,
       } as any);
       
       const xhr = new XMLHttpRequest();
@@ -572,9 +626,13 @@ export default function CreatePostScreen() {
             if (response.status === 'success') {
               await uploadNotificationService.showUploadComplete(fileName);
               
+              const successMessage = status === 'draft' 
+                ? 'Draft saved successfully! You can publish it later from your profile.'
+                : 'Post created successfully! It will be reviewed and appear in your profile.';
+              
               Alert.alert(
                 'Success', 
-                'Post created successfully! It will be reviewed and appear in your profile.', 
+                successMessage, 
                 [
                   { 
                     text: 'View Profile', 
@@ -590,12 +648,28 @@ export default function CreatePostScreen() {
               setSelectedGroup('');
               setSelectedCategoryId('');
               setRecordedVideoUri(null);
+              setCapturedImageUri(null);
               setEditedVideoUri(null);
               setThumbnailUri(null);
               setIsVideoPlaying(false);
             } else {
-              await uploadNotificationService.showUploadError(response.message || 'Failed to create post', fileName);
-              Alert.alert('Error', response.message || 'Failed to create post');
+              // Handle draft limit error
+              if (response.message?.includes('Maximum draft limit reached') || response.message?.includes('draft limit')) {
+                Alert.alert(
+                  'Draft Limit Reached',
+                  `You can only have a maximum of 3 draft posts. Please publish or delete existing drafts before creating a new one.`,
+                  [
+                    {
+                      text: 'View Drafts',
+                      onPress: () => router.replace('/(tabs)/profile')
+                    },
+                    { text: 'OK' }
+                  ]
+                );
+              } else {
+                await uploadNotificationService.showUploadError(response.message || 'Failed to create post', fileName);
+                Alert.alert('Error', response.message || 'Failed to create post');
+              }
             }
           } catch (e) {
             await uploadNotificationService.showUploadError('Failed to parse server response', fileName);
@@ -624,6 +698,19 @@ export default function CreatePostScreen() {
   };
 
   const currentVideoUri = editedVideoUri || recordedVideoUri;
+  const currentMediaUri = currentVideoUri || capturedImageUri;
+
+  // Handle video playback
+  const handlePlayPause = async () => {
+    if (videoRef.current) {
+      if (isVideoPlaying) {
+        await videoRef.current.pauseAsync();
+      } else {
+        await videoRef.current.playAsync();
+      }
+      setIsVideoPlaying(!isVideoPlaying);
+    }
+  };
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -642,9 +729,10 @@ export default function CreatePostScreen() {
             ref={cameraRef}
             style={styles.camera}
             facing={cameraFacing}
-            mode="video"
-          >
-            <View style={styles.cameraOverlay}>
+            mode={cameraMode}
+          />
+          {/* Overlay with absolute positioning */}
+          <View style={styles.cameraOverlay}>
               {/* Top bar with cancel, timer, and flip */}
               <View style={styles.cameraTopBar}>
                 <TouchableOpacity
@@ -665,23 +753,42 @@ export default function CreatePostScreen() {
                   </View>
                 ) : (
                   <View style={styles.cameraHint}>
-                    <Text style={styles.cameraHintText}>Max 2:30</Text>
+                    <Text style={styles.cameraHintText}>
+                      {cameraMode === 'video' ? 'Max 2:30' : 'Picture Mode'}
+                    </Text>
                   </View>
                 )}
 
-                <TouchableOpacity
-                  style={styles.cameraFlipButton}
-                  onPress={handleFlipCamera}
-                  disabled={isRecording}
-                  accessibilityLabel="Flip camera"
-                  accessibilityRole="button"
-                >
-                  <MaterialIcons 
-                    name="flip-camera-ios" 
-                    size={28} 
-                    color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
-                  />
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  {/* Mode Toggle */}
+                  <TouchableOpacity
+                    style={styles.cameraModeButton}
+                    onPress={() => setCameraMode(cameraMode === 'video' ? 'picture' : 'video')}
+                    disabled={isRecording}
+                    accessibilityLabel={`Switch to ${cameraMode === 'video' ? 'picture' : 'video'} mode`}
+                    accessibilityRole="button"
+                  >
+                    <MaterialIcons 
+                      name={cameraMode === 'video' ? 'photo-camera' : 'videocam'} 
+                      size={24} 
+                      color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
+                    />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.cameraFlipButton}
+                    onPress={handleFlipCamera}
+                    disabled={isRecording}
+                    accessibilityLabel="Flip camera"
+                    accessibilityRole="button"
+                  >
+                    <MaterialIcons 
+                      name="flip-camera-ios" 
+                      size={28} 
+                      color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
+                    />
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {/* Bottom controls */}
@@ -690,24 +797,35 @@ export default function CreatePostScreen() {
                   {/* Placeholder for symmetry */}
                   <View style={styles.cameraControlPlaceholder} />
                   
-                  {/* Record/Stop Button */}
-                  {!isRecording ? (
-                    <TouchableOpacity
-                      style={styles.recordButtonLarge}
-                      onPress={startRecording}
-                      accessibilityLabel="Start recording"
-                      accessibilityRole="button"
-                    >
-                      <View style={styles.recordButtonInner} />
-                    </TouchableOpacity>
+                  {/* Record/Stop/Capture Button */}
+                  {cameraMode === 'video' ? (
+                    !isRecording ? (
+                      <TouchableOpacity
+                        style={styles.recordButtonLarge}
+                        onPress={startRecording}
+                        accessibilityLabel="Start recording"
+                        accessibilityRole="button"
+                      >
+                        <View style={styles.recordButtonInner} />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.stopButtonLarge}
+                        onPress={stopRecording}
+                        accessibilityLabel="Stop recording"
+                        accessibilityRole="button"
+                      >
+                        <View style={styles.stopButtonInner} />
+                      </TouchableOpacity>
+                    )
                   ) : (
                     <TouchableOpacity
-                      style={styles.stopButtonLarge}
-                      onPress={stopRecording}
-                      accessibilityLabel="Stop recording"
+                      style={styles.captureButtonLarge}
+                      onPress={takePicture}
+                      accessibilityLabel="Take picture"
                       accessibilityRole="button"
                     >
-                      <View style={styles.stopButtonInner} />
+                      <View style={styles.captureButtonInner} />
                     </TouchableOpacity>
                   )}
                   
@@ -716,16 +834,18 @@ export default function CreatePostScreen() {
                 </View>
                 
                 <Text style={styles.cameraInstructionText}>
-                  {isRecording ? 'Tap to stop recording' : 'Tap to start recording'}
+                  {cameraMode === 'video' 
+                    ? (isRecording ? 'Tap to stop recording' : 'Tap to start recording')
+                    : 'Tap to capture photo'}
                 </Text>
               </View>
             </View>
-          </CameraView>
         </View>
       )}
 
+
       {/* STAGE 1: FULL STUDIO (CAMERA) – NO FORMS */}
-      {!currentVideoUri && (
+      {!currentVideoUri && !capturedImageUri && (
         <View style={[styles.studioContainer, { paddingTop: insets.top + 16 }]}>
           <View style={styles.studioHeader}>
             <Text style={[styles.studioTitle, { color: C.text }]}>Create Post Studio</Text>
@@ -768,8 +888,8 @@ export default function CreatePostScreen() {
         </View>
       )}
 
-      {/* STAGE 2: DETAILS FORM (AFTER VIDEO CONFIRMED) */}
-      {currentVideoUri && (
+      {/* STAGE 2: DETAILS FORM (AFTER MEDIA CONFIRMED) */}
+      {currentMediaUri && (
         <KeyboardAvoidingView 
           style={{ flex: 1 }} 
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -781,55 +901,73 @@ export default function CreatePostScreen() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* Video Preview Section */}
+            {/* Media Preview Section */}
             <View style={[styles.videoPreviewSection, { paddingTop: insets.top + 8 }]}>
               <View style={styles.videoPreviewContainer}>
-                <Video
-                  ref={videoRef}
-                  source={{ uri: currentVideoUri }}
-                  style={styles.videoPlayer}
-                  resizeMode={ResizeMode.COVER}
-                  isLooping
-                  shouldPlay={false}
-                  onPlaybackStatusUpdate={(status) => {
-                    if (status.isLoaded) {
-                      setIsVideoPlaying(status.isPlaying);
-                    }
-                  }}
-                />
-                
-                {/* Play/Pause Overlay */}
-                <TouchableOpacity 
-                  style={styles.videoPlayOverlay}
-                  onPress={handlePlayPause}
-                  activeOpacity={0.8}
-                  accessibilityLabel={isVideoPlaying ? 'Pause video' : 'Play video'}
-                  accessibilityRole="button"
-                >
-                  {!isVideoPlaying && (
-                    <View style={styles.playButtonCircle}>
-                      <MaterialIcons name="play-arrow" size={48} color="#fff" />
-                    </View>
-                  )}
-                </TouchableOpacity>
+                {currentVideoUri ? (
+                  <>
+                    <Video
+                      ref={videoRef}
+                      source={{ uri: currentVideoUri }}
+                      style={styles.videoPlayer}
+                      resizeMode={ResizeMode.COVER}
+                      isLooping
+                      shouldPlay={false}
+                      onPlaybackStatusUpdate={(status) => {
+                        if (status.isLoaded) {
+                          setIsVideoPlaying(status.isPlaying);
+                        }
+                      }}
+                    />
+                    
+                    {/* Play/Pause Overlay */}
+                    <TouchableOpacity 
+                      style={styles.videoPlayOverlay}
+                      onPress={handlePlayPause}
+                      activeOpacity={0.8}
+                      accessibilityLabel={isVideoPlaying ? 'Pause video' : 'Play video'}
+                      accessibilityRole="button"
+                    >
+                      {!isVideoPlaying && (
+                        <View style={styles.playButtonCircle}>
+                          <MaterialIcons name="play-arrow" size={48} color="#fff" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <Image
+                    source={{ uri: capturedImageUri || '' }}
+                    style={styles.videoPlayer}
+                    resizeMode="cover"
+                  />
+                )}
 
-                {/* Video Controls */}
+                {/* Media Controls */}
                 <View style={styles.videoControlsBar}>
                   <TouchableOpacity
                     style={styles.videoControlButton}
-                    onPress={handleRecordVideo}
+                    onPress={() => {
+                      if (currentVideoUri) {
+                        handleRecordVideo();
+                      } else {
+                        setShowCamera(true);
+                        setCameraMode('picture');
+                      }
+                    }}
                     disabled={uploading}
-                    accessibilityLabel="Re-record video"
+                    accessibilityLabel={currentVideoUri ? "Re-record video" : "Retake photo"}
                     accessibilityRole="button"
                   >
-                    <MaterialIcons name="videocam" size={20} color="#fff" />
-                    <Text style={styles.videoControlText}>Re-record</Text>
+                    <MaterialIcons name={currentVideoUri ? "videocam" : "photo-camera"} size={20} color="#fff" />
+                    <Text style={styles.videoControlText}>{currentVideoUri ? "Re-record" : "Retake"}</Text>
                   </TouchableOpacity>
                   
                   <TouchableOpacity
                     style={[styles.videoControlButton, styles.discardButton]}
                     onPress={() => {
                       setRecordedVideoUri(null);
+                      setCapturedImageUri(null);
                       setEditedVideoUri(null);
                       setThumbnailUri(null);
                       setCaption('');
@@ -838,7 +976,7 @@ export default function CreatePostScreen() {
                       setIsVideoPlaying(false);
                     }}
                     disabled={uploading}
-                    accessibilityLabel="Discard video"
+                    accessibilityLabel="Discard media"
                     accessibilityRole="button"
                   >
                     <MaterialIcons name="delete-outline" size={20} color="#ef4444" />
@@ -848,6 +986,7 @@ export default function CreatePostScreen() {
               </View>
               {errors.media && <Text style={[styles.errorText, { color: C.error, textAlign: 'center', marginTop: 8 }]}>{errors.media}</Text>}
             </View>
+
 
             {/* Form Content */}
             <View style={styles.formContainer}>
@@ -1064,27 +1203,89 @@ export default function CreatePostScreen() {
                 </View>
               )}
 
-              {/* Submit Button */}
-              <TouchableOpacity
-                style={[
-                  styles.publishButton,
-                  { backgroundColor: C.primary },
-                  (uploading || !caption.trim() || !selectedCategoryId) && styles.publishButtonDisabled,
-                ]}
-                onPress={handleCreatePost}
-                disabled={uploading || !currentVideoUri || !caption.trim() || !selectedCategoryId}
-                accessibilityLabel="Publish post"
-                accessibilityRole="button"
-              >
-                {uploading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <MaterialIcons name="rocket-launch" size={24} color="#fff" />
-                    <Text style={styles.publishButtonText}>Publish Post</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              {/* Action Buttons - Horizontal */}
+              <View style={styles.quickActionButtonsContainer}>
+                <TouchableOpacity
+                  style={[styles.quickActionButton, styles.quickPublishButton, (uploading || !caption.trim() || !selectedCategoryId) && styles.quickActionButtonDisabled]}
+                  onPress={() => {
+                    if (caption.trim() && selectedCategoryId) {
+                      handleCreatePost('pending');
+                    } else {
+                      Alert.alert(
+                        'Complete Details',
+                        'Please add a caption and select a category to publish.',
+                        [{ text: 'OK' }]
+                      );
+                    }
+                  }}
+                  disabled={uploading || !currentMediaUri || !caption.trim() || !selectedCategoryId}
+                  accessibilityLabel="Publish post"
+                  accessibilityRole="button"
+                >
+                  {uploading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <MaterialIcons name="rocket-launch" size={20} color="#fff" />
+                      <Text style={styles.quickActionButtonText}>Publish</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickActionButton, styles.quickDraftButton, (uploading || !caption.trim() || !selectedCategoryId) && styles.quickActionButtonDisabled]}
+                  onPress={async () => {
+                    if (caption.trim() && selectedCategoryId) {
+                      await handleCreatePost('draft');
+                    } else {
+                      Alert.alert(
+                        'Complete Details',
+                        'Please add a caption and select a category to save as draft.',
+                        [{ text: 'OK' }]
+                      );
+                    }
+                  }}
+                  disabled={uploading || !currentMediaUri || !caption.trim() || !selectedCategoryId}
+                  accessibilityLabel="Save as draft"
+                  accessibilityRole="button"
+                >
+                  <MaterialIcons name="save" size={20} color="#fff" />
+                  <Text style={styles.quickActionButtonText}>Save Draft</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.quickActionButton, styles.quickDiscardButton]}
+                  onPress={() => {
+                    Alert.alert(
+                      'Discard Post?',
+                      'Are you sure you want to discard this post? This action cannot be undone.',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Discard',
+                          style: 'destructive',
+                          onPress: () => {
+                            setRecordedVideoUri(null);
+                            setCapturedImageUri(null);
+                            setEditedVideoUri(null);
+                            setThumbnailUri(null);
+                            setCaption('');
+                            setSelectedGroup('');
+                            setSelectedCategoryId('');
+                            setIsVideoPlaying(false);
+                          }
+                        }
+                      ]
+                    );
+                  }}
+                  disabled={uploading}
+                  accessibilityLabel="Discard post"
+                  accessibilityRole="button"
+                >
+                  <MaterialIcons name="delete-outline" size={20} color="#fff" />
+                  <Text style={styles.quickActionButtonText}>Discard</Text>
+                </TouchableOpacity>
+              </View>
 
               {/* Bottom spacing */}
               <View style={{ height: insets.bottom + 20 }} />
@@ -1697,5 +1898,146 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '700',
+  },
+  // Post Action Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  postActionModal: {
+    backgroundColor: '#1a1a1a',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  postActionModalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  postActionModalSubtitle: {
+    fontSize: 14,
+    color: '#999',
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  postActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    marginBottom: 12,
+    gap: 12,
+  },
+  postActionPublishButton: {
+    backgroundColor: '#60a5fa',
+  },
+  postActionDraftButton: {
+    backgroundColor: '#8b5cf6',
+  },
+  postActionDiscardButton: {
+    backgroundColor: '#ef4444',
+  },
+  postActionButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    flex: 1,
+  },
+  postActionButtonSubtext: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  postActionCancelButton: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  postActionCancelText: {
+    color: '#999',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  // Capture Button
+  captureButtonLarge: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#fff',
+  },
+  captureButtonInner: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#fff',
+  },
+  // Camera Mode Button
+  cameraModeButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Draft Save Button
+  draftSaveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 8,
+  },
+  draftSaveButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Quick Action Buttons (Horizontal)
+  quickActionButtonsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    marginTop: 8,
+  },
+  quickActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    gap: 8,
+  },
+  quickPublishButton: {
+    backgroundColor: '#60a5fa',
+  },
+  quickDraftButton: {
+    backgroundColor: '#8b5cf6',
+  },
+  quickDiscardButton: {
+    backgroundColor: '#ef4444',
+  },
+  quickActionButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  quickActionButtonDisabled: {
+    opacity: 0.5,
   },
 });

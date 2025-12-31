@@ -523,6 +523,33 @@ export const postsApi = {
       };
     }
   },
+
+  // Draft Posts API
+  getDrafts: async (page = 1, limit = 20): Promise<ApiResponse<{ posts: Post[]; pagination: any }>> => {
+    try {
+      const response = await apiClient.get(`/api/posts/drafts?page=${page}&limit=${limit}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch draft posts',
+        data: { posts: [], pagination: {} },
+      };
+    }
+  },
+
+  publishDraft: async (postId: string): Promise<ApiResponse<{ post: Post }>> => {
+    try {
+      const response = await apiClient.put(`/api/posts/${postId}/publish`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to publish draft post',
+        data: { post: {} as Post },
+      };
+    }
+  },
   addComment: async (postId: string, content: string): Promise<ApiResponse<{ comment: any }>> => {
     try {
       // Validate content before sending
