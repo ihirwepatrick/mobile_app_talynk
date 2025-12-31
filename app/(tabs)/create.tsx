@@ -28,7 +28,7 @@ import { API_BASE_URL } from '@/lib/config';
 import * as FileSystem from 'expo-file-system/legacy';
 import { generateThumbnail } from '@/lib/utils/thumbnail';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
-import { Video, ResizeMode } from 'expo-av';
+import { Video, ResizeMode, Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -248,6 +248,23 @@ export default function CreatePostScreen() {
     return selectedCategoryId || '';
   };
 
+  // --- CONFIGURE AUDIO MODE ---
+  useEffect(() => {
+    const configureAudio = async () => {
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,                  // Required during recording
+          playsInSilentModeIOS: true,                // Play audio even in silent mode
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,         // Force speaker on Android
+        });
+      } catch (error) {
+        console.error('Error configuring audio mode:', error);
+      }
+    };
+    configureAudio();
+  }, []);
+
   // --- FETCH CATEGORIES ---
   useEffect(() => {
     if (authLoading) return;
@@ -302,6 +319,14 @@ export default function CreatePostScreen() {
         }
       }
 
+      // Set audio mode for recording before opening camera
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: false,
+      });
+
       setShowCamera(true);
       setRecordingDuration(0);
     } catch (error: any) {
@@ -344,27 +369,42 @@ export default function CreatePostScreen() {
         });
       }, 1000);
 
+      // Set audio mode for recording (allowsRecordingIOS: true)
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: false,
+      });
+
       // Start recording (this is async and will resolve when stopRecording is called)
       // Enhanced audio settings for better quality and volume
       const recordingOptions: any = {
         maxDuration: 150, // 2:30 minutes in seconds
         mute: false, // CRITICAL: Ensure audio is not muted - explicitly set to false
-        // Audio quality settings
         quality: 'high', // Use high quality recording
       };
       
       // Platform-specific options with enhanced audio settings
       if (Platform.OS === 'ios') {
         recordingOptions.codec = 'h264';
+        recordingOptions.extension = '.mov';
+        recordingOptions.videoBitrate = 5000000; // 5 Mbps video
         // iOS audio settings for better quality
-        recordingOptions.audioBitrate = 128000; // 128 kbps for good audio quality
+        recordingOptions.audioBitrate = 128000; // iOS often caps AAC at ~128kbps
         recordingOptions.audioSampleRate = 44100; // Standard CD quality sample rate (44.1 kHz)
+        recordingOptions.audioChannels = 2; // Stereo audio
       } else {
-        // Android settings
+        // Android settings with improved audio source
         recordingOptions.maxFileSize = 100 * 1024 * 1024; // 100MB max for Android
-        recordingOptions.audioBitrate = 128000; // 128 kbps for good audio quality
+        recordingOptions.extension = '.mp4';
+        recordingOptions.videoBitrate = 5000000; // 5 Mbps video
+        // Android audio settings - higher bitrate for better quality
+        recordingOptions.audioBitrate = 192000; // Higher audio bitrate (192 kbps)
         recordingOptions.audioSampleRate = 44100; // Standard CD quality sample rate (44.1 kHz)
         recordingOptions.audioChannels = 2; // Stereo audio (2 channels)
+        // Note: audioSource: CAMCORDER would be ideal but may not be directly available in expo-camera
+        // The high bitrate and quality settings should help improve audio clarity
       }
       
       console.log('Starting recording with options:', recordingOptions);
@@ -730,6 +770,14 @@ export default function CreatePostScreen() {
       if (isVideoPlaying) {
         await videoRef.current.pauseAsync();
       } else {
+        // Force speaker for playback (allowsRecordingIOS: false switches to bottom speaker on iOS)
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,  // This switches iOS to bottom speaker
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false, // Force speaker on Android
+        });
+        
         // Ensure video is unmuted and at full volume before playing
         await videoRef.current.setIsMutedAsync(false);
         await videoRef.current.setVolumeAsync(1.0);
