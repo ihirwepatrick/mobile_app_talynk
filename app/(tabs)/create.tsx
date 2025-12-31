@@ -761,7 +761,7 @@ export default function CreatePostScreen() {
           {/* Overlay with absolute positioning */}
             <View style={styles.cameraOverlay}>
               {/* Top bar - only cancel and timer */}
-              <View style={[styles.cameraTopBar, { paddingTop: 8 }]}>
+              <View style={[styles.cameraTopBar, { paddingTop: insets.top + 16 }]}>
                 <TouchableOpacity
                   style={styles.cameraCancelButton}
                   onPress={cancelCamera}
