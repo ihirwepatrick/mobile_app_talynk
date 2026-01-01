@@ -268,7 +268,7 @@ const PostItem: React.FC<PostItemProps> = ({
           },
           {
             text: 'Log In',
-            onPress: () => router.push('/auth/login')
+            onPress: () => router.push({ pathname: '/auth/login' as any })
           }
         ]
       );
@@ -323,7 +323,7 @@ const PostItem: React.FC<PostItemProps> = ({
 
   const handleFollow = () => {
     if (!user) {
-      router.push('/auth/login');
+      router.push({ pathname: '/auth/login' as any });
       return;
     }
     
@@ -343,7 +343,7 @@ const PostItem: React.FC<PostItemProps> = ({
   const handleUserPress = () => {
             if (item.user?.id) {
               router.push({
-                pathname: '/user/[id]',
+                pathname: '/user/[id]' as any,
                 params: { id: item.user.id }
               });
             }
@@ -353,7 +353,7 @@ const PostItem: React.FC<PostItemProps> = ({
     const categoryName = typeof item.category === 'string' ? item.category : item.category?.name;
     if (categoryName) {
       router.push({
-        pathname: '/category/[name]',
+        pathname: '/category/[name]' as any,
         params: { name: categoryName }
       });
     }
@@ -373,7 +373,7 @@ const PostItem: React.FC<PostItemProps> = ({
             >
               {mediaUrl ? (
                 <Image
-                  source={{ uri: item.thumbnail_url || mediaUrl }}
+                  source={{ uri: (item as any).thumbnail_url || mediaUrl }}
                   style={styles.media}
                   resizeMode="cover"
                   onError={() => {
@@ -828,7 +828,7 @@ export default function FeedScreen() {
         'Please log in to like posts.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Login', onPress: () => router.push('/auth/login') }
+          { text: 'Login', onPress: () => router.push({ pathname: '/auth/login' as any }) }
         ]
       );
       return;
@@ -894,7 +894,7 @@ export default function FeedScreen() {
 
   const handleReport = (postId: string) => {
     if (!user) {
-      router.push('/auth/login');
+      router.push({ pathname: '/auth/login' as any });
       return;
     }
     setReportPostId(postId);
@@ -964,7 +964,7 @@ export default function FeedScreen() {
         
         <TouchableOpacity 
           style={styles.searchButton}
-          onPress={() => router.push('/search')}
+          onPress={() => router.push({ pathname: '/search' as any })}
         >
           <Feather name="search" size={24} color="#fff" />
         </TouchableOpacity>

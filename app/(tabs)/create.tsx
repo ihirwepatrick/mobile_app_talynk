@@ -30,6 +30,10 @@ import { generateThumbnail } from '@/lib/utils/thumbnail';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Video, ResizeMode, Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import ViewShot from 'react-native-view-shot';
+import { WatermarkOverlay } from '@/lib/utils/watermark';
+import { captureRef } from 'react-native-view-shot';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -144,6 +148,10 @@ export default function CreatePostScreen() {
   const [showPostActionModal, setShowPostActionModal] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cameraViewShotRef = useRef<ViewShot>(null);
+  const watermarkViewRef = useRef<View>(null);
+  const imageCompositeRef = useRef<ViewShot>(null); // For compositing image + watermark
+  const [tempImageUri, setTempImageUri] = useState<string | null>(null); // Temporary image for compositing
   const C = COLORS.dark;
   const [mainCategories, setMainCategories] = useState<{ id: number, name: string, children?: { id: number, name: string }[] }[]>([]);
   const [subcategories, setSubcategories] = useState<{ id: number, name: string }[]>([]);
@@ -249,15 +257,18 @@ export default function CreatePostScreen() {
   };
 
   // --- CONFIGURE AUDIO MODE ---
+  // Initialize audio mode on component mount
   useEffect(() => {
     const configureAudio = async () => {
       try {
+        // Set initial audio mode for recording
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: true,                  // Required during recording
           playsInSilentModeIOS: true,                // Play audio even in silent mode
           shouldDuckAndroid: false,
           playThroughEarpieceAndroid: false,         // Force speaker on Android
         });
+        console.log('Audio mode configured for recording');
       } catch (error) {
         console.error('Error configuring audio mode:', error);
       }
@@ -319,13 +330,20 @@ export default function CreatePostScreen() {
         }
       }
 
-      // Set audio mode for recording before opening camera
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: false,
-        playThroughEarpieceAndroid: false,
-      });
+      // CRITICAL: Set audio mode for recording before opening camera
+      // This ensures the audio session is ready when the camera opens
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,  // CRITICAL: Required for iOS audio recording
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+        });
+        // Small delay to ensure audio mode is fully initialized
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (audioError) {
+        console.error('Error setting audio mode before camera:', audioError);
+      }
 
       setShowCamera(true);
       setRecordingDuration(0);
@@ -369,16 +387,44 @@ export default function CreatePostScreen() {
         });
       }, 1000);
 
-      // Set audio mode for recording (allowsRecordingIOS: true)
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: false,
-        playThroughEarpieceAndroid: false,
-      });
+      // CRITICAL: Set audio mode for recording BEFORE starting
+      // This must be done right before recording to ensure proper audio capture
+      // The order and timing here is critical for audio to work properly
+      try {
+        // First, ensure we're in recording mode with optimal settings
+        // These settings help capture louder, clearer audio
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,  // CRITICAL: Required for iOS audio recording
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: false,  // Don't duck other audio on Android
+          playThroughEarpieceAndroid: false, // Use speaker, not earpiece
+          staysActiveInBackground: false, // Don't need background recording
+        });
+        
+        // Verify microphone permission is still granted
+        if (!microphonePermission?.granted) {
+          console.error('Microphone permission not granted before recording');
+          Alert.alert('Error', 'Microphone permission is required for audio recording.');
+          setIsRecording(false);
+          return;
+        }
+        
+        // Small delay to ensure audio session is fully initialized
+        // This is critical - without this delay, audio might not be captured properly
+        // Increased delay slightly to ensure audio session is ready
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        console.log('Audio mode set for recording, microphone permission verified');
+      } catch (audioError) {
+        console.error('Error setting audio mode:', audioError);
+        Alert.alert('Audio Error', 'Failed to configure audio for recording. Please try again.');
+        setIsRecording(false);
+        return;
+      }
 
       // Start recording (this is async and will resolve when stopRecording is called)
       // Enhanced audio settings for better quality and volume
+      // CRITICAL: These settings aim to capture clear, loud audio like native camera apps
       const recordingOptions: any = {
         maxDuration: 150, // 2:30 minutes in seconds
         mute: false, // CRITICAL: Ensure audio is not muted - explicitly set to false
@@ -390,24 +436,27 @@ export default function CreatePostScreen() {
         recordingOptions.codec = 'h264';
         recordingOptions.extension = '.mov';
         recordingOptions.videoBitrate = 5000000; // 5 Mbps video
-        // iOS audio settings for better quality
-        recordingOptions.audioBitrate = 128000; // iOS often caps AAC at ~128kbps
-        recordingOptions.audioSampleRate = 44100; // Standard CD quality sample rate (44.1 kHz)
+        // iOS audio settings optimized for clear, loud audio
+        recordingOptions.audioBitrate = 192000; // Increased from 128kbps for better quality
+        recordingOptions.audioSampleRate = 48000; // Higher sample rate (48kHz) for better quality
         recordingOptions.audioChannels = 2; // Stereo audio
+        // Note: iOS handles noise suppression automatically, but higher bitrate helps
       } else {
-        // Android settings with improved audio source
+        // Android settings optimized for clear, loud audio
         recordingOptions.maxFileSize = 100 * 1024 * 1024; // 100MB max for Android
         recordingOptions.extension = '.mp4';
         recordingOptions.videoBitrate = 5000000; // 5 Mbps video
-        // Android audio settings - higher bitrate for better quality
-        recordingOptions.audioBitrate = 192000; // Higher audio bitrate (192 kbps)
-        recordingOptions.audioSampleRate = 44100; // Standard CD quality sample rate (44.1 kHz)
+        // Android audio settings - optimized for video recording (like native camera)
+        recordingOptions.audioBitrate = 256000; // Higher audio bitrate (256 kbps) for better quality
+        recordingOptions.audioSampleRate = 48000; // Higher sample rate (48kHz) for better quality
         recordingOptions.audioChannels = 2; // Stereo audio (2 channels)
-        // Note: audioSource: CAMCORDER would be ideal but may not be directly available in expo-camera
-        // The high bitrate and quality settings should help improve audio clarity
+        // Try to use video-optimized audio source if available
+        // Note: expo-camera may not expose audioSource directly, but higher bitrate helps
       }
       
       console.log('Starting recording with options:', recordingOptions);
+      console.log('Audio mode set, microphone permission:', microphonePermission?.granted);
+      
       const recordingPromise = cameraRef.current.recordAsync(recordingOptions);
       
       recordingPromise.then((video) => {
@@ -499,18 +548,125 @@ export default function CreatePostScreen() {
     }
   };
 
+  // --- CREATE WATERMARK IMAGE ---
+  const createWatermarkImage = async (): Promise<string | null> => {
+    try {
+      if (!user?.id || !watermarkViewRef.current) {
+        console.warn('User ID or watermark view not available');
+        return null;
+      }
+
+      // Capture the watermark view as an image
+      try {
+        const watermarkUri = await captureRef(watermarkViewRef, {
+          format: 'png',
+          quality: 1.0,
+        });
+        return watermarkUri;
+      } catch (error) {
+        console.error('Error capturing watermark view:', error);
+        return null;
+      }
+    } catch (error) {
+      console.error('Error creating watermark image:', error);
+      return null;
+    }
+  };
+
+  // --- ADD WATERMARK TO IMAGE ---
+  // Uses view-shot to composite the watermark onto the image
+  const addWatermarkToImage = async (imageUri: string): Promise<string> => {
+    try {
+      if (!user?.id) {
+        console.warn('User ID not available, skipping watermark');
+        return imageUri;
+      }
+
+      // Set the image URI temporarily so we can render it in the composite view
+      setTempImageUri(imageUri);
+      
+      // Wait a bit for the view to render
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Capture the composite view (image + watermark overlay)
+      if (imageCompositeRef.current) {
+        try {
+          // Use ViewShot's capture method directly
+          const watermarkedUri = await imageCompositeRef.current.capture();
+          setTempImageUri(null); // Clear temp image
+          return watermarkedUri;
+        } catch (error) {
+          console.error('Error capturing watermarked image:', error);
+          setTempImageUri(null);
+          return imageUri;
+        }
+      }
+      
+      setTempImageUri(null);
+      return imageUri;
+    } catch (error) {
+      console.error('Error adding watermark to image:', error);
+      setTempImageUri(null);
+      return imageUri;
+    }
+  };
+
+  // --- ADD WATERMARK TO VIDEO ---
+  const addWatermarkToVideo = async (videoUri: string): Promise<string> => {
+    try {
+      if (!user?.id) {
+        console.warn('User ID not available, skipping watermark');
+        return videoUri;
+      }
+
+      // Video watermarking requires FFmpeg or server-side processing
+      // For Expo Go, we can't easily watermark videos client-side
+      // The best approach is server-side processing after upload
+      // For now, return the original video
+      console.warn('Video watermarking requires server-side processing or native modules');
+      return videoUri;
+    } catch (error) {
+      console.error('Error adding watermark to video:', error);
+      return videoUri;
+    }
+  };
+
   // --- IMAGE CAPTURE ---
   const takePicture = async () => {
     if (!cameraRef.current) return;
 
     try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-        base64: false,
-      });
+      // Try to capture with view-shot first (includes watermark overlay)
+      // If that fails, fall back to regular capture and add watermark separately
+      let imageUri: string | null = null;
+      
+      if (cameraViewShotRef.current && cameraViewShotRef.current.capture) {
+        try {
+          const uri = await cameraViewShotRef.current.capture();
+          if (uri) {
+            imageUri = uri;
+          }
+        } catch (viewShotError) {
+          console.log('View-shot capture failed, using regular capture:', viewShotError);
+          // Fall back to regular capture
+        }
+      }
+      
+      // If view-shot didn't work, use regular camera capture
+      if (!imageUri) {
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: 0.8,
+          base64: false,
+        });
+        if (photo && photo.uri) {
+          imageUri = photo.uri;
+        }
+      }
 
-      if (photo && photo.uri) {
-        setCapturedImageUri(photo.uri);
+      if (imageUri) {
+        // Add watermark to the captured image (if not already included via view-shot)
+        const watermarkedUri = await addWatermarkToImage(imageUri);
+        setCapturedImageUri(watermarkedUri);
         setRecordedVideoUri(null); // Clear video when image is captured
         setEditedVideoUri(null);
         setShowCamera(false);
@@ -796,10 +952,30 @@ export default function CreatePostScreen() {
   return (
     <View style={[styles.container, { backgroundColor: C.background }]}>
       <StatusBar style="light" backgroundColor="#000000" />
+      
+      {/* Hidden composite view for watermarking images */}
+      {tempImageUri && (
+        <View style={styles.hiddenCompositeView} collapsable={false}>
+          <ViewShot ref={imageCompositeRef} style={styles.compositeViewShot}>
+            <Image 
+              source={{ uri: tempImageUri }} 
+              style={styles.compositeImage}
+              resizeMode="cover"
+            />
+            {user?.id && (
+              <WatermarkOverlay appName="Talentix" userId={user.id} ref={watermarkViewRef} />
+            )}
+          </ViewShot>
+        </View>
+      )}
 
       {/* Camera Modal */}
       {showCamera && (
-        <View style={[styles.cameraContainer, { paddingTop: insets.top }]}>
+        <ViewShot
+          ref={cameraViewShotRef}
+          options={{ format: 'jpg', quality: 0.9 }}
+          style={[styles.cameraContainer, { paddingTop: insets.top }]}
+        >
           <CameraView
             ref={cameraRef}
             style={styles.camera}
@@ -808,6 +984,14 @@ export default function CreatePostScreen() {
           />
           {/* Overlay with absolute positioning */}
             <View style={styles.cameraOverlay}>
+              {/* Watermark - Bottom Right */}
+              {user?.id && (
+                <View style={styles.watermarkContainer}>
+                  <Text style={styles.watermarkText}>Talentix</Text>
+                  <Text style={styles.watermarkUserId}>{user.id}</Text>
+                </View>
+              )}
+
               {/* Top bar - only cancel and timer */}
               <View style={[styles.cameraTopBar, { paddingTop: insets.top + 16 }]}>
                 <TouchableOpacity
@@ -898,7 +1082,7 @@ export default function CreatePostScreen() {
                 </View>
               </View>
             </View>
-        </View>
+        </ViewShot>
       )}
 
 
@@ -1344,7 +1528,7 @@ export default function CreatePostScreen() {
                 >
                   <MaterialIcons name="delete-outline" size={20} color="#fff" />
                   <Text style={styles.quickActionButtonText}>Discard</Text>
-                </TouchableOpacity>
+            </TouchableOpacity>
               </View>
 
               {/* Bottom spacing */}
@@ -2097,5 +2281,48 @@ const styles = StyleSheet.create({
   },
   quickActionButtonDisabled: {
     opacity: 0.5,
+  },
+  // Watermark
+  watermarkContainer: {
+    position: 'absolute',
+    bottom: 100, // Above the bottom controls
+    right: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  watermarkText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  watermarkUserId: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  hiddenCompositeView: {
+    position: 'absolute',
+    left: -9999,
+    top: -9999,
+    width: 1,
+    height: 1,
+    opacity: 0,
+    overflow: 'hidden',
+  },
+  compositeViewShot: {
+    width: SCREEN_WIDTH,
+    height: (SCREEN_WIDTH * 16) / 9,
+  },
+  compositeImage: {
+    width: '100%',
+    height: '100%',
   },
 });
