@@ -438,12 +438,6 @@ const PostItem: React.FC<PostItemProps> = ({
           </View>
         )}
 
-        {/* Video progress bar - positioned above bottom info */}
-        {isVideo && !useNativeControls && isActive && videoDuration > 0 && (
-          <View style={[styles.progressBarContainer, { bottom: Math.max(insets.bottom + 100, 120) }]}>
-            <View style={[styles.progressBar, { width: `${videoProgress * 100}%` }]} />
-          </View>
-        )}
 
         {/* Heart animation overlay */}
         <Animated.View 
@@ -495,8 +489,8 @@ const PostItem: React.FC<PostItemProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Bottom Info - positioned with proper spacing */}
-        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom, 16) }]}>
+        {/* Bottom Info - positioned above progress bar */}
+        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom + 5, 21) }]}>
           <View style={styles.bottomInfoContent}>
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
@@ -519,6 +513,13 @@ const PostItem: React.FC<PostItemProps> = ({
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Video progress bar - at the very bottom edge */}
+        {isVideo && !useNativeControls && isActive && videoDuration > 0 && (
+          <View style={[styles.progressBarContainer, { bottom: insets.bottom }]}>
+            <View style={[styles.progressBar, { width: `${videoProgress * 100}%` }]} />
+          </View>
+        )}
       </View>
     </View>
   );

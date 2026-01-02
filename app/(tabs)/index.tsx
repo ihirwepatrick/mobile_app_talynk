@@ -498,20 +498,6 @@ const PostItem: React.FC<PostItemProps> = ({
           </TouchableOpacity>
         )}
 
-        {/* Video Progress Bar - at bottom edge, above bottom info */}
-        {isVideo && !useNativeControls && videoDuration > 0 && (
-          <View style={[styles.progressBarContainer, { bottom: Math.max(insets.bottom + 100, 120) }]}>
-            <View style={styles.progressBarTrack}>
-              <View 
-                style={[
-                  styles.progressBarFill,
-                  { width: `${videoProgress * 100}%` }
-                ]} 
-              />
-            </View>
-          </View>
-        )}
-
         {/* Right Side Actions - TikTok style, positioned with proper spacing */}
         <View style={[styles.rightActions, { bottom: Math.max(insets.bottom + 60, 80) }]}>
           {/* User Avatar */}
@@ -581,8 +567,8 @@ const PostItem: React.FC<PostItemProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Bottom Info - positioned with proper spacing */}
-        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom, 16) }]}>
+        {/* Bottom Info - positioned above progress bar */}
+        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom + 5, 21) }]}>
           <View style={styles.bottomInfoContent}>
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
@@ -623,6 +609,20 @@ const PostItem: React.FC<PostItemProps> = ({
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Video Progress Bar - at the very bottom edge */}
+        {isVideo && !useNativeControls && videoDuration > 0 && (
+          <View style={[styles.progressBarContainer, { bottom: insets.bottom }]}>
+            <View style={styles.progressBarTrack}>
+              <View 
+                style={[
+                  styles.progressBarFill,
+                  { width: `${videoProgress * 100}%` }
+                ]} 
+              />
+            </View>
+          </View>
+        )}
       </View>
     </View>
   );
