@@ -160,9 +160,10 @@ const PostItem: React.FC<PostItemProps> = ({
   const insets = useSafeAreaInsets();
   
   // Calculate available height (screen - header - bottom nav)
-  const headerContentHeight = 50;
+  const headerContentHeight = 44; // Reduced from 50
   const headerPaddingBottom = 8;
-  const headerHeight = insets.top + headerContentHeight + headerPaddingBottom;
+  const headerTopPadding = Math.max(insets.top, 8); // Use minimal padding
+  const headerHeight = headerTopPadding + headerContentHeight + headerPaddingBottom;
   const bottomNavHeight = 60 + insets.bottom;
   const availableHeight = screenHeight - headerHeight - bottomNavHeight;
   
@@ -708,10 +709,11 @@ export default function FeedScreen() {
   const likesManager = useLikesManager();
   
   // Calculate available height for posts (screen height - header - bottom navbar)
-  // Header: insets.top (safe area) + ~50px (tabs content) + 8px (paddingBottom)
-  const headerContentHeight = 50; // Tabs container height
+  // Header: minimal safe area padding + ~44px (tabs content) + 8px (paddingBottom)
+  const headerContentHeight = 44; // Tabs container height (reduced)
   const headerPaddingBottom = 8;
-  const headerHeight = insets.top + headerContentHeight + headerPaddingBottom;
+  const headerTopPadding = Math.max(insets.top, 8); // Use minimal padding
+  const headerHeight = headerTopPadding + headerContentHeight + headerPaddingBottom;
   const bottomNavHeight = 60 + insets.bottom; // Bottom navbar height
   const availableHeight = screenHeight - headerHeight - bottomNavHeight;
 
@@ -1022,7 +1024,7 @@ export default function FeedScreen() {
       <StatusBar barStyle="light-content" translucent />
       
       {/* Header with tabs and search */}
-      <View style={[styles.header, { paddingTop: insets.top }]}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
         <View style={styles.tabsContainer}>
           {FEED_TABS.map((tab) => (
             <TouchableOpacity
@@ -1173,8 +1175,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingBottom: 8,
+    paddingTop: 0, // Will be set inline
     backgroundColor: 'rgba(0,0,0,0.95)',
     zIndex: 100,
+    minHeight: 52, // Ensure minimum height for content
   },
   tabsContainer: {
     flexDirection: 'row',
