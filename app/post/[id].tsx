@@ -309,7 +309,7 @@ export default function PostDetailScreen() {
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-          <Feather name="git-branch" size={24} color="#fff" />
+          <Feather name="share-2" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
 

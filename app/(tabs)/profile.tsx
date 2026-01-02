@@ -1240,7 +1240,7 @@ export default function ProfileScreen() {
                 }
               }}
             >
-              <Feather name="share" size={20} color="#fff" />
+              <Feather name="share-2" size={20} color="#60a5fa" />
               <Text style={styles.menuItemText}>Share Post</Text>
             </TouchableOpacity>
             
