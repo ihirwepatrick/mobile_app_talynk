@@ -384,9 +384,12 @@ const PostItem: React.FC<PostItemProps> = ({
   };
 
   return (
-    <View style={[styles.postContainer, { height: screenHeight }]}>
+    <View 
+      style={[styles.postContainer, { height: screenHeight }]}
+      pointerEvents="box-none"
+    >
       {/* Media */}
-      <View style={[styles.mediaContainer, { height: screenHeight }]}>
+      <View style={[styles.mediaContainer, { height: screenHeight, width: screenWidth }]}>
         {isVideo ? (
           videoError || !isActive ? (
             // Show thumbnail when video has error OR when not active (memory optimization)
@@ -403,7 +406,7 @@ const PostItem: React.FC<PostItemProps> = ({
               {mediaUrl ? (
                 <Image
                   source={{ uri: getThumbnailUrl(item) || mediaUrl }}
-                  style={styles.media}
+                  style={[styles.media, { width: screenWidth, height: screenHeight }]}
                   resizeMode="cover"
                   onLoadStart={() => setImageLoading(true)}
                   onLoad={() => {
@@ -506,7 +509,7 @@ const PostItem: React.FC<PostItemProps> = ({
             {mediaUrl && !imageError ? (
               <Image
                 source={{ uri: mediaUrl }}
-                style={styles.media}
+                style={[styles.media, { width: screenWidth, height: screenHeight }]}
                 resizeMode="cover"
                 onLoadStart={() => setImageLoading(true)}
                 onLoad={() => {
@@ -1067,6 +1070,9 @@ export default function FeedScreen() {
           // Smooth scrolling optimizations
           scrollEventThrottle={16}
           disableIntervalMomentum={true}
+          nestedScrollEnabled={false}
+          scrollEnabled={true}
+          bounces={false}
           // Lazy loading optimizations for better performance
           windowSize={3}
           initialNumToRender={2}
@@ -1193,9 +1199,11 @@ const styles = StyleSheet.create({
   postContainer: {
     width: '100%',
     backgroundColor: '#000',
+    overflow: 'hidden',
   },
   mediaContainer: {
     width: '100%',
+    height: '100%',
     position: 'relative',
     backgroundColor: '#000',
     justifyContent: 'center',
@@ -1210,9 +1218,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   media: {
-    width: '100%',
-    height: '100%',
     backgroundColor: '#000',
+    flex: 1,
+    alignSelf: 'stretch',
   },
   muteButton: {
     position: 'absolute',
