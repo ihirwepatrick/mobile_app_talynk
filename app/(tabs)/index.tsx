@@ -414,8 +414,8 @@ const PostItem: React.FC<PostItemProps> = ({
               {mediaUrl ? (
                 <Image
                   source={{ uri: getThumbnailUrl(item) || mediaUrl }}
-                  style={[styles.media, { width: screenWidth, height: availableHeight }]}
-                  resizeMode="cover"
+                  style={styles.media}
+                  resizeMode="contain"
                   onLoadStart={() => setImageLoading(true)}
                   onLoad={() => {
                     setImageLoading(false);
@@ -455,8 +455,8 @@ const PostItem: React.FC<PostItemProps> = ({
               <Video
                 ref={videoRef}
                 source={{ uri: mediaUrl || '' }}
-                style={[styles.media, { width: screenWidth, height: availableHeight }]}
-                resizeMode={ResizeMode.COVER}
+                style={styles.media}
+                resizeMode={ResizeMode.CONTAIN}
                 shouldPlay={useNativeControls ? false : !decoderErrorDetected}
                 isLooping={!useNativeControls}
                 isMuted={useNativeControls ? false : isMuted}
@@ -517,8 +517,8 @@ const PostItem: React.FC<PostItemProps> = ({
             {mediaUrl && !imageError ? (
               <Image
                 source={{ uri: mediaUrl }}
-                style={[styles.media, { width: screenWidth, height: availableHeight }]}
-                resizeMode="cover"
+                style={styles.media}
+                resizeMode="contain"
                 onLoadStart={() => setImageLoading(true)}
                 onLoad={() => {
                   setImageLoading(false);
@@ -1225,8 +1225,10 @@ const styles = StyleSheet.create({
   },
   media: {
     backgroundColor: '#000',
-    flex: 1,
-    alignSelf: 'stretch',
+    width: '100%',
+    height: '100%',
+    maxWidth: '100%',
+    maxHeight: '100%',
   },
   muteButton: {
     position: 'absolute',
