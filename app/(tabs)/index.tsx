@@ -95,11 +95,10 @@ const timeAgo = (date: string): string => {
   return postDate.toLocaleDateString();
 };
 
+import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+
 const getMediaUrl = (post: Post): string | null => {
-  // Check for fullUrl first (from API response), then video_url/image, then imageUrl
-  const url = (post as any).fullUrl || post.video_url || post.image || post.imageUrl || '';
-  // Return null if no valid URL instead of placeholder
-  return url && url.trim() !== '' ? url : null;
+  return getPostMediaUrl(post);
 };
 
 interface PostItemProps {
@@ -200,6 +199,21 @@ const PostItem: React.FC<PostItemProps> = ({
   const likeOpacity = useRef(new Animated.Value(0)).current;
 
   const mediaUrl = getMediaUrl(item);
+  
+  // Log post item structure for debugging (only first 3 items to avoid spam)
+  if (__DEV__ && index < 3) {
+    console.log(`📄 [PostItem ${index}] Post data:`, {
+      id: item.id,
+      type: item.type,
+      video_url: item.video_url,
+      image: item.image,
+      imageUrl: item.imageUrl,
+      fullUrl: (item as any).fullUrl,
+      mediaUrl: mediaUrl,
+      allKeys: Object.keys(item),
+    });
+  }
+  
   const isVideo = item.type === 'video' || !!item.video_url || 
     (mediaUrl !== null && (mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm')));
 
@@ -373,7 +387,7 @@ const PostItem: React.FC<PostItemProps> = ({
             >
               {mediaUrl ? (
                 <Image
-                  source={{ uri: (item as any).thumbnail_url || mediaUrl }}
+                  source={{ uri: getThumbnailUrl(item) || mediaUrl }}
                   style={styles.media}
                   resizeMode="cover"
                   onError={() => {
@@ -503,7 +517,7 @@ const PostItem: React.FC<PostItemProps> = ({
           {/* User Avatar */}
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
             <Image 
-              source={{ uri: item.user?.profile_picture || 'https://via.placeholder.com/48' }} 
+              source={{ uri: getProfilePictureUrl(item.user, 'https://via.placeholder.com/48') || 'https://via.placeholder.com/48' }} 
               style={styles.userAvatar} 
             />
             {user && user.id !== item.user?.id && (
@@ -695,6 +709,24 @@ export default function FeedScreen() {
       if (response.status === 'success') {
         const posts = response.data.posts || response.data;
         const postsArray = Array.isArray(posts) ? posts : [];
+        
+        // Log posts structure for debugging
+        if (__DEV__) {
+          console.log('📥 [fetchPosts] API Response:', {
+            status: response.status,
+            postsCount: postsArray.length,
+            firstPost: postsArray[0] ? {
+              id: postsArray[0].id,
+              type: postsArray[0].type,
+              video_url: postsArray[0].video_url,
+              image: postsArray[0].image,
+              imageUrl: postsArray[0].imageUrl,
+              fullUrl: (postsArray[0] as any).fullUrl,
+              allKeys: Object.keys(postsArray[0]),
+            } : null,
+            samplePost: postsArray[0],
+          });
+        }
         
         // Check pagination info
         const pagination = response.data.pagination || {};

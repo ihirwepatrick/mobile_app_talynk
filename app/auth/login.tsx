@@ -42,28 +42,55 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
-  const { login, loading } = useAuth();
+  const { login, loading, error: authError, clearError } = useAuth();
   const C = THEME;
   const insets = useSafeAreaInsets();
   
+  // Use auth context error, fallback to local error
+  const displayError = authError || localError;
+
+  // Clear errors when user starts typing
+  const handleUsernameChange = (text: string) => {
+    setUsername(text);
+    if (displayError) {
+      setLocalError(null);
+      clearError();
+    }
+  };
+
+  const handlePasswordChange = (text: string) => {
+    setPassword(text);
+    if (displayError) {
+      setLocalError(null);
+      clearError();
+    }
+  };
 
   const handleLogin = async () => {
-    setError(null);
+    setLocalError(null);
     setSuccess(null);
     setWarning(null);
-    if (!username || !password) {
-      setError('Please fill in all fields');
+    clearError();
+    
+    if (!username.trim() || !password.trim()) {
+      setLocalError('Please fill in all fields');
       return;
     }
-    const success = await login(username, password);
+    
+    const success = await login(username.trim(), password);
     if (success) {
       setSuccess('Login successful!');
-      router.replace('/');
+      // Small delay to show success message
+      setTimeout(() => {
+        router.replace('/');
+      }, 500);
     } else {
-      setError('Invalid username/email or password');
+      // Error is already set in auth context, but we can enhance the message
+      const errorMessage = authError || 'Invalid username/email or password';
+      setLocalError(errorMessage);
     }
   };
 
@@ -95,10 +122,26 @@ export default function LoginScreen() {
         </View>
 
         {/* Alerts */}
-        {error && (
+        {displayError && (
           <View style={[styles.alert, { backgroundColor: C.errorBg, borderColor: C.errorBorder }]}> 
             <Ionicons name="alert-circle" size={20} color={'#fecaca'} style={{ marginRight: 8 }} />
-            <Text style={[styles.alertText, { color: C.text }]}>{error}</Text>
+            <Text style={[styles.alertText, { color: '#fecaca' }]}>
+              {displayError.includes('Invalid credentials') 
+                ? 'Invalid username/email or password. Please check your credentials and try again.'
+                : displayError.includes('401') || displayError.includes('Unauthorized')
+                ? 'Invalid username/email or password. Please check your credentials and try again.'
+                : displayError}
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                setLocalError(null);
+                clearError();
+              }}
+              hitSlop={10}
+              style={styles.dismissButton}
+            >
+              <Ionicons name="close" size={18} color={'#fecaca'} />
+            </TouchableOpacity>
           </View>
         )}
         {success && (
@@ -123,7 +166,7 @@ export default function LoginScreen() {
               style={[styles.inputField, { color: C.text }]}
               placeholder="Enter your email or username"
               value={username}
-              onChangeText={setUsername}
+              onChangeText={handleUsernameChange}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="default"
@@ -146,7 +189,7 @@ export default function LoginScreen() {
                 style={[styles.inputField, { color: C.text }]}
                 placeholder="••••••••"
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={handlePasswordChange}
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -258,6 +301,11 @@ const styles = StyleSheet.create({
   alertText: {
     fontSize: 15,
     flex: 1,
+    lineHeight: 20,
+  },
+  dismissButton: {
+    padding: 4,
+    marginLeft: 8,
   },
   form: {
     width: '100%',

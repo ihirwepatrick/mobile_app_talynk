@@ -86,42 +86,10 @@ const timeAgo = (date: string): string => {
   return postDate.toLocaleDateString();
 };
 
+import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+
 const getMediaUrl = (post: Post): string | null => {
-  // Check multiple possible field names for media URL
-  const p = post as any;
-  let url = p.fullUrl || 
-            p.video_url || 
-            p.videoUrl ||
-            p.image || 
-            p.imageUrl || 
-            p.thumbnail ||
-            p.media_url ||
-            p.mediaUrl ||
-            '';
-  
-  // Handle relative URLs by prepending API base URL
-  if (url && url.trim() !== '') {
-    url = url.trim();
-    // If URL starts with / but not //, it's a relative path
-    if (url.startsWith('/') && !url.startsWith('//')) {
-      url = `${API_BASE_URL}${url}`;
-    }
-    // If URL doesn't start with http, prepend API base URL
-    else if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      url = `${API_BASE_URL}/${url}`;
-    }
-    return url;
-  }
-  
-  // Debug log to help identify the issue
-  console.log('Post missing media URL:', {
-    id: post.id,
-    title: p.title,
-    type: p.type,
-    availableKeys: Object.keys(p)
-  });
-  
-  return null;
+  return getPostMediaUrl(post);
 };
 
 interface PostItemProps {
@@ -209,6 +177,20 @@ const PostItem: React.FC<PostItemProps> = ({
   const likeOpacity = useRef(new Animated.Value(0)).current;
 
   const mediaUrl = getMediaUrl(item);
+  
+  // Log post item structure for debugging (only first 3 items to avoid spam)
+  if (__DEV__ && index < 3) {
+    console.log(`📄 [ProfileFeed PostItem ${index}] Post data:`, {
+      id: item.id,
+      type: item.type,
+      video_url: item.video_url,
+      image: item.image,
+      imageUrl: item.imageUrl,
+      fullUrl: (item as any).fullUrl,
+      mediaUrl: mediaUrl,
+      allKeys: Object.keys(item),
+    });
+  }
   const isVideo = item.type === 'video' || !!item.video_url || 
     (mediaUrl !== null && (mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm')));
 
@@ -351,7 +333,7 @@ const PostItem: React.FC<PostItemProps> = ({
             >
               {mediaUrl ? (
                 <Image
-                  source={{ uri: item.thumbnail_url || mediaUrl }}
+                  source={{ uri: getThumbnailUrl(item) || mediaUrl }}
                   style={styles.media}
                   resizeMode="cover"
                   onError={() => {
@@ -479,7 +461,7 @@ const PostItem: React.FC<PostItemProps> = ({
           {/* User avatar */}
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
             <Image
-              source={{ uri: item.user?.profile_picture || 'https://via.placeholder.com/40' }}
+              source={{ uri: getProfilePictureUrl(item.user, 'https://via.placeholder.com/40') || 'https://via.placeholder.com/40' }}
               style={styles.avatar}
             />
           </TouchableOpacity>
@@ -609,7 +591,7 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
         setLoadingMore(true);
       }
       
-      const postStatus = status || 'approved';
+      const postStatus = status || 'active';
       const isOwnProfile = user && user.id === userId;
       
       let response;
@@ -621,16 +603,35 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
         if (response.status === 'success' && response.data?.posts) {
           let allPosts = response.data.posts || [];
           // Filter by status
-          if (postStatus === 'approved') {
-            postsArray = allPosts.filter((p: any) => p.status === 'approved' || !p.status);
-          } else if (postStatus === 'pending') {
-            postsArray = allPosts.filter((p: any) => p.status === 'pending');
-          } else if (postStatus === 'rejected') {
-            postsArray = allPosts.filter((p: any) => p.status === 'rejected');
-          } else if (postStatus === 'reported') {
-            postsArray = allPosts.filter((p: any) => p.status === 'reported');
+          if (postStatus === 'active') {
+            // Show active posts (or legacy approved posts, or posts with no status default to active)
+            postsArray = allPosts.filter((p: any) => 
+              p.status === 'active' || 
+              p.status === 'approved' || // Legacy support
+              !p.status // Default to active
+            );
+          } else if (postStatus === 'draft') {
+            postsArray = allPosts.filter((p: any) => p.status === 'draft');
+          } else if (postStatus === 'suspended') {
+            // Show suspended posts (or legacy rejected/reported posts)
+            postsArray = allPosts.filter((p: any) => 
+              p.status === 'suspended' || 
+              p.status === 'rejected' || // Legacy support
+              p.status === 'reported' // Legacy support
+            );
           } else {
-            postsArray = allPosts;
+            // Legacy status support
+            if (postStatus === 'approved') {
+              postsArray = allPosts.filter((p: any) => p.status === 'approved' || !p.status);
+            } else if (postStatus === 'pending') {
+              postsArray = allPosts.filter((p: any) => p.status === 'pending');
+            } else if (postStatus === 'rejected') {
+              postsArray = allPosts.filter((p: any) => p.status === 'rejected');
+            } else if (postStatus === 'reported') {
+              postsArray = allPosts.filter((p: any) => p.status === 'reported');
+            } else {
+              postsArray = allPosts;
+            }
           }
         }
       } else {
@@ -640,6 +641,26 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
           const postsData = response.data?.posts || response.data || [];
           postsArray = Array.isArray(postsData) ? postsData : [];
         }
+      }
+      
+      // Log posts structure for debugging
+      if (__DEV__) {
+        console.log('📥 [ProfileFeed fetchPosts] API Response:', {
+          status: response?.status,
+          isOwnProfile,
+          postStatus,
+          postsCount: postsArray.length,
+          firstPost: postsArray[0] ? {
+            id: postsArray[0].id,
+            type: postsArray[0].type,
+            video_url: postsArray[0].video_url,
+            image: postsArray[0].image,
+            imageUrl: postsArray[0].imageUrl,
+            fullUrl: (postsArray[0] as any).fullUrl,
+            allKeys: Object.keys(postsArray[0]),
+          } : null,
+          samplePost: postsArray[0],
+        });
       }
       
       if (response?.status === 'success' && postsArray.length >= 0) {

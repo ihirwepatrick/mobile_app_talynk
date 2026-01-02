@@ -61,8 +61,8 @@ export default function SearchScreen() {
   };
 
   const renderPostResult = ({ item }: { item: Post }) => {
-    const mediaUrl = item.video_url || item.image || '';
-    const isVideo = !!item.video_url;
+    const mediaUrl = getPostMediaUrl(item) || '';
+    const isVideo = !!(item.video_url || item.videoUrl);
 
     return (
       <TouchableOpacity 

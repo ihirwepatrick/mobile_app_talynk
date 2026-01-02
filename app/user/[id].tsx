@@ -530,7 +530,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       params: { 
         userId: id as string, 
         initialPostId: post.id,
-        status: 'approved'
+        status: 'active'
       }
     });
   };

@@ -28,6 +28,7 @@ import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
+import { getFileUrl, getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
@@ -54,23 +55,24 @@ interface VideoThumbnailProps {
   isActive: boolean;
   onPress: () => void;
   onOptionsPress?: () => void;
+  onPublishPress?: () => void;
 }
 
-const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress }: VideoThumbnailProps) => {
+const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress }: VideoThumbnailProps) => {
   const videoRef = useRef<Video>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
   
-  const videoUrl = post.video_url || post.videoUrl || '';
+  const videoUrl = getFileUrl(post.video_url || post.videoUrl || '');
   const isVideo = !!videoUrl;
   
   // Get fallback image URL
-  const fallbackImageUrl = (post as any).thumbnail_url || post.image || (post as any).thumbnail || '';
+  const fallbackImageUrl = getThumbnailUrl(post) || getFileUrl(post.image || (post as any).thumbnail || '');
   
   // Generate thumbnail for videos, use image directly for non-videos
   const generatedThumbnail = useVideoThumbnail(
     isVideo ? videoUrl : null,
-    fallbackImageUrl,
+    fallbackImageUrl || '',
     1000 // Extract thumbnail at 1 second
   );
   
@@ -78,7 +80,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress }: VideoThumbn
   // For images: use image directly
   const staticThumbnailUrl = isVideo 
     ? (generatedThumbnail || fallbackImageUrl)
-    : (post.image || post.imageUrl || post.fullUrl || '');
+    : getPostMediaUrl(post) || '';
 
   useEffect(() => {
     if (isActive && isVideo && videoUrl) {
@@ -162,10 +164,10 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress }: VideoThumbn
         {/* Status indicator */}
         <View style={[
           styles.statusIndicator,
-          { backgroundColor: getStatusColor(post.status || 'approved') }
+          { backgroundColor: getStatusColor(post.status || 'active') }
         ]}>
           <MaterialIcons 
-            name={getStatusIcon(post.status || 'approved') as any} 
+            name={getStatusIcon(post.status || 'active') as any} 
             size={10} 
             color="#fff" 
           />
@@ -199,6 +201,34 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress }: VideoThumbn
           <Feather name="more-vertical" size={16} color="#fff" />
         </TouchableOpacity>
       )}
+      
+      {/* Publish button for draft posts */}
+      {(() => {
+        const isDraft = post.status === 'draft' || post.status === 'Draft';
+        if (__DEV__ && isDraft) {
+          console.log('📤 [VideoThumbnail] Draft post detected, showing publish button:', {
+            postId: post.id,
+            status: post.status,
+            hasOnPublishPress: !!onPublishPress,
+          });
+        }
+        return isDraft && onPublishPress;
+      })() && (
+        <TouchableOpacity
+          style={styles.publishDraftButton}
+          onPress={(e) => {
+            e.stopPropagation();
+            if (__DEV__) {
+              console.log('📤 [VideoThumbnail] Publish button pressed');
+            }
+            onPublishPress();
+          }}
+          activeOpacity={0.8}
+        >
+          <Feather name="send" size={14} color="#fff" />
+          <Text style={styles.publishDraftButtonText}>Publish</Text>
+        </TouchableOpacity>
+      )}
     </TouchableOpacity>
   );
 };
@@ -216,28 +246,36 @@ const formatNumber = (num: number): string => {
 
 const getStatusColor = (status: string) => {
   switch (status) {
+    case 'active': return '#10b981';
+    case 'draft': return '#6b7280';
+    case 'suspended': return '#ef4444';
+    // Legacy status support (for migration period)
     case 'approved': return '#10b981';
     case 'pending': return '#f59e0b';
     case 'rejected': return '#ef4444';
     case 'reported': return '#8b5cf6';
-    default: return '#10b981';
+    default: return '#10b981'; // Default to active
   }
 };
 
 const getStatusIcon = (status: string) => {
   switch (status) {
+    case 'active': return 'check-circle';
+    case 'draft': return 'drafts';
+    case 'suspended': return 'cancel';
+    // Legacy status support (for migration period)
     case 'approved': return 'check-circle';
     case 'pending': return 'schedule';
     case 'rejected': return 'cancel';
     case 'reported': return 'report';
-    default: return 'check-circle';
+    default: return 'check-circle'; // Default to active
   }
 };
 
 const PROFILE_TABS = [
-  { key: 'approved', label: 'Active Posts', icon: 'check-circle' },
+  { key: 'active', label: 'Active Posts', icon: 'check-circle' },
   { key: 'draft', label: 'Drafts', icon: 'drafts' },
-  { key: 'rejected', label: 'Suspended', icon: 'cancel' },
+  { key: 'suspended', label: 'Suspended', icon: 'cancel' },
 ];
 
 export default function ProfileScreen() {
@@ -250,7 +288,7 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<any>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('approved');
+  const [activeTab, setActiveTab] = useState('active');
   const [refreshing, setRefreshing] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
@@ -293,7 +331,7 @@ export default function ProfileScreen() {
         teaserIntervalRef.current = setInterval(() => {
           setActiveTeaserIndex(prev => {
             const videoIndices = posts
-              .map((p, i) => p.video_url ? i : -1)
+              .map((p, i) => getFileUrl(p.video_url) ? i : -1)
               .filter(i => i !== -1);
             
             if (videoIndices.length === 0) return 0;
@@ -328,6 +366,14 @@ export default function ProfileScreen() {
       router.replace('/auth/login');
       return;
     }
+    
+    if (__DEV__) {
+      console.log('🔄 [useEffect] Tab or user changed:', {
+        activeTab,
+        userId: user?.id,
+      });
+    }
+    
     loadProfile();
     loadPosts();
   }, [user, activeTab]);
@@ -378,10 +424,31 @@ export default function ProfileScreen() {
       setError(null);
       if (showLoading) setLoadingPosts(true);
       
+      if (__DEV__) {
+        console.log('📥 [loadPosts] Loading posts for tab:', activeTab);
+      }
+      
       // Fetch drafts separately if draft tab is active
       let response;
       if (activeTab === 'draft') {
+        if (__DEV__) {
+          console.log('📥 [loadPosts] Fetching drafts...');
+        }
         response = await postsApi.getDrafts(1, 100);
+        if (__DEV__) {
+          console.log('📥 [loadPosts] Drafts API Response:', {
+            status: response.status,
+            postsCount: response.data?.posts?.length || 0,
+            firstDraft: response.data?.posts?.[0] ? {
+              id: response.data.posts[0].id,
+              status: response.data.posts[0].status,
+              type: response.data.posts[0].type,
+              video_url: response.data.posts[0].video_url,
+              image: response.data.posts[0].image,
+              allKeys: Object.keys(response.data.posts[0]),
+            } : null,
+          });
+        }
         if (response.status === 'success' && response.data?.posts) {
           setPosts(response.data.posts);
           setTotalLikes(0); // Drafts don't have likes yet
@@ -389,23 +456,70 @@ export default function ProfileScreen() {
         }
       }
       
+      if (__DEV__) {
+        console.log('📥 [loadPosts] Fetching own posts...');
+      }
       response = await userApi.getOwnPosts();
+      
+      if (__DEV__) {
+        console.log('📥 [loadPosts] Own Posts API Response:', {
+          status: response.status,
+          postsCount: response.data?.posts?.length || 0,
+          firstPost: response.data?.posts?.[0] ? {
+            id: response.data.posts[0].id,
+            status: response.data.posts[0].status,
+            type: response.data.posts[0].type,
+            video_url: response.data.posts[0].video_url,
+            image: response.data.posts[0].image,
+            allKeys: Object.keys(response.data.posts[0]),
+          } : null,
+        });
+      }
+      
       if (response.status === 'success' && response.data?.posts) {
         let filteredPosts = response.data.posts;
         
         // Filter by tab
         switch (activeTab) {
-          case 'approved':
-            filteredPosts = filteredPosts.filter((p: any) => p.status === 'approved' || !p.status);
+          case 'active':
+            // Show active posts (or legacy approved posts, or posts with no status default to active)
+            filteredPosts = filteredPosts.filter((p: any) => 
+              p.status === 'active' || 
+              p.status === 'approved' || // Legacy support
+              !p.status // Default to active
+            );
             break;
           case 'draft':
             filteredPosts = filteredPosts.filter((p: any) => p.status === 'draft');
             break;
-          case 'rejected':
-            filteredPosts = filteredPosts.filter((p: any) => p.status === 'rejected' || p.status === 'reported');
+          case 'suspended':
+            // Show suspended posts (or legacy rejected/reported posts)
+            filteredPosts = filteredPosts.filter((p: any) => 
+              p.status === 'suspended' || 
+              p.status === 'rejected' || // Legacy support
+              p.status === 'reported' // Legacy support
+            );
             break;
           default:
-            filteredPosts = filteredPosts.filter((p: any) => (p.status || 'approved') === 'approved');
+            // Default to active
+            filteredPosts = filteredPosts.filter((p: any) => 
+              p.status === 'active' || 
+              p.status === 'approved' || // Legacy support
+              !p.status // Default to active
+            );
+        }
+        
+        if (__DEV__) {
+          console.log('📥 [loadPosts] Filtered posts:', {
+            activeTab,
+            beforeFilter: response.data.posts.length,
+            afterFilter: filteredPosts.length,
+            statusBreakdown: filteredPosts.reduce((acc: any, p: any) => {
+              const status = p.status || 'active';
+              acc[status] = (acc[status] || 0) + 1;
+              return acc;
+            }, {}),
+          });
         }
         
         setPosts(filteredPosts);
@@ -631,7 +745,115 @@ export default function ProfileScreen() {
     setVideoRef(null);
   };
 
+  const handlePublishDraft = async (postId: string) => {
+    // Log the draft post being published
+    const draftPost = posts.find(p => p.id === postId);
+    if (__DEV__) {
+      console.log('📤 [handlePublishDraft] Publishing draft post:', {
+        postId,
+        post: draftPost ? {
+          id: draftPost.id,
+          status: draftPost.status,
+          type: draftPost.type,
+          video_url: draftPost.video_url,
+          image: draftPost.image,
+          caption: draftPost.caption,
+          category: draftPost.category,
+          allKeys: Object.keys(draftPost),
+        } : null,
+      });
+    }
+
+    Alert.alert(
+      'Publish Post',
+      'Are you sure you want to publish this draft? It will be submitted for review.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Publish',
+          style: 'default',
+          onPress: async () => {
+            try {
+              if (__DEV__) {
+                console.log('📤 [handlePublishDraft] Calling API to publish post:', postId);
+              }
+
+              const response = await postsApi.publishDraft(postId);
+              
+              if (__DEV__) {
+                console.log('📤 [handlePublishDraft] API Response:', {
+                  status: response.status,
+                  message: response.message,
+                  data: response.data ? {
+                    post: {
+                      id: response.data.post?.id,
+                      status: response.data.post?.status,
+                      type: response.data.post?.type,
+                      video_url: response.data.post?.video_url,
+                      image: response.data.post?.image,
+                    },
+                  } : null,
+                });
+              }
+              
+              if (response.status === 'success') {
+                // Remove from drafts list
+                setPosts(prevPosts => {
+                  const filtered = prevPosts.filter(post => post.id !== postId);
+                  if (__DEV__) {
+                    console.log('📤 [handlePublishDraft] Removed from drafts. Remaining drafts:', filtered.length);
+                  }
+                  return filtered;
+                });
+                
+                // Show success message
+                Alert.alert(
+                  'Success',
+                  'Your post has been published and is pending review.',
+                  [{ text: 'OK' }]
+                );
+                
+                // Refresh posts to update counts
+                await loadPosts(true);
+              } else {
+                if (__DEV__) {
+                  console.error('❌ [handlePublishDraft] Failed to publish:', response.message);
+                }
+                Alert.alert('Error', response.message || 'Failed to publish post. Please try again.');
+              }
+            } catch (error: any) {
+              if (__DEV__) {
+                console.error('❌ [handlePublishDraft] Error publishing draft:', {
+                  error,
+                  message: error?.message,
+                  postId,
+                });
+              }
+              Alert.alert(
+                'Error',
+                error?.message || 'Failed to publish post. Please try again.'
+              );
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const handleDeletePost = async (postId: string) => {
+    const postToDelete = posts.find(p => p.id === postId);
+    
+    if (__DEV__) {
+      console.log('🗑️ [handleDeletePost] Deleting post:', {
+        postId,
+        post: postToDelete ? {
+          id: postToDelete.id,
+          status: postToDelete.status,
+          type: postToDelete.type,
+        } : null,
+      });
+    }
+    
     Alert.alert(
       'Delete Post',
       'Are you sure you want to delete this post?',
@@ -639,11 +861,33 @@ export default function ProfileScreen() {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: async () => {
           try {
+            if (__DEV__) {
+              console.log('🗑️ [handleDeletePost] Calling API to delete post:', postId);
+            }
+            
             await postsApi.deletePost(postId);
-            setPosts(prev => prev.filter(p => p.id !== postId));
+            
+            if (__DEV__) {
+              console.log('🗑️ [handleDeletePost] Post deleted successfully');
+            }
+            
+            setPosts(prev => {
+              const filtered = prev.filter(p => p.id !== postId);
+              if (__DEV__) {
+                console.log('🗑️ [handleDeletePost] Removed from list. Remaining posts:', filtered.length);
+              }
+              return filtered;
+            });
             setPostOptionsModalVisible(false);
             setSelectedPost(null);
-          } catch (error) {
+          } catch (error: any) {
+            if (__DEV__) {
+              console.error('❌ [handleDeletePost] Error deleting post:', {
+                error,
+                message: error?.message,
+                postId,
+              });
+            }
             Alert.alert('Error', 'Failed to delete post');
           }
         }}
@@ -654,11 +898,35 @@ export default function ProfileScreen() {
   const renderPost = ({ item, index }: { item: Post; index: number }) => {
     const isActiveTeaser = isScreenFocused && activeTeaserIndex === index;
     
+    // Log post being rendered (only first few to avoid spam)
+    if (__DEV__ && index < 3) {
+      console.log(`📄 [renderPost ${index}] Rendering post:`, {
+        id: item.id,
+        status: item.status,
+        type: item.type,
+        video_url: item.video_url,
+        image: item.image,
+        imageUrl: item.imageUrl,
+        fullUrl: (item as any).fullUrl,
+        caption: item.caption,
+        category: item.category,
+        activeTab,
+        allKeys: Object.keys(item),
+      });
+    }
+    
     return (
       <VideoThumbnail
         post={item}
         isActive={isActiveTeaser}
         onPress={() => {
+          if (__DEV__) {
+            console.log('👆 [renderPost] Post pressed:', {
+              postId: item.id,
+              status: item.status,
+              activeTab,
+            });
+          }
           // Navigate to full-screen profile feed with current post as initial
           router.push({
             pathname: '/profile-feed/[userId]',
@@ -670,9 +938,25 @@ export default function ProfileScreen() {
           });
         }}
         onOptionsPress={() => {
+          if (__DEV__) {
+            console.log('⚙️ [renderPost] Options pressed for post:', {
+              postId: item.id,
+              status: item.status,
+            });
+          }
           // Open options modal when 3 dots is clicked
           setSelectedPost(item);
           setPostOptionsModalVisible(true);
+        }}
+        onPublishPress={() => {
+          if (__DEV__) {
+            console.log('📤 [renderPost] Publish button pressed for draft:', {
+              postId: item.id,
+              status: item.status,
+            });
+          }
+          // Publish draft directly from grid
+          handlePublishDraft(item.id);
         }}
       />
     );
@@ -720,9 +1004,9 @@ export default function ProfileScreen() {
       >
         {/* Profile Info */}
         <View style={styles.profileSection}>
-          {profile.profile_picture ? (
+          {getProfilePictureUrl(profile) ? (
             <Image
-              source={{ uri: profile.profile_picture }}
+              source={{ uri: getProfilePictureUrl(profile)! }}
               style={styles.avatar}
             />
           ) : (
@@ -781,7 +1065,15 @@ export default function ProfileScreen() {
                 styles.tab,
                 activeTab === tab.key && styles.tabActive
               ]}
-              onPress={() => setActiveTab(tab.key)}
+              onPress={() => {
+                if (__DEV__) {
+                  console.log('🔄 [Tab Change] Switching to tab:', {
+                    from: activeTab,
+                    to: tab.key,
+                  });
+                }
+                setActiveTab(tab.key);
+              }}
             >
               <MaterialIcons 
                 name={tab.icon as any} 
@@ -810,7 +1102,7 @@ export default function ProfileScreen() {
             <View style={styles.emptyContainer}>
               <MaterialIcons name="video-library" size={48} color="#666" />
               <Text style={styles.emptyText}>No {activeTab} posts</Text>
-              {activeTab === 'approved' && (
+              {activeTab === 'active' && (
                 <TouchableOpacity 
                   style={styles.createButton}
                   onPress={() => router.push('/(tabs)/create')}
@@ -886,11 +1178,11 @@ export default function ProfileScreen() {
             {selectedPost && (
               <View style={styles.postOptionsPreview}>
                 <View style={styles.postOptionsPreviewMedia}>
-                  {selectedPost.video_url ? (
+                  {getFileUrl(selectedPost.video_url) ? (
                     <View style={styles.postOptionsThumbnail}>
                       <Feather name="video" size={24} color="#60a5fa" />
                     </View>
-                  ) : selectedPost.image ? (
+                  ) : getPostMediaUrl(selectedPost) ? (
                     <Image 
                       source={{ uri: selectedPost.image }} 
                       style={styles.postOptionsThumbnail}
@@ -919,6 +1211,22 @@ export default function ProfileScreen() {
             )}
             
             <View style={styles.menuDivider} />
+            
+            {/* Publish Draft Button - Only show for draft posts */}
+            {selectedPost?.status === 'draft' && (
+              <TouchableOpacity 
+                style={[styles.menuItem, styles.menuItemPrimary]}
+                onPress={() => {
+                  setPostOptionsModalVisible(false);
+                  if (selectedPost) {
+                    handlePublishDraft(selectedPost.id);
+                  }
+                }}
+              >
+                <Feather name="send" size={20} color="#10b981" />
+                <Text style={[styles.menuItemText, { color: '#10b981' }]}>Publish Post</Text>
+              </TouchableOpacity>
+            )}
             
             <TouchableOpacity 
               style={styles.menuItem}
@@ -1181,6 +1489,29 @@ const styles = StyleSheet.create({
     minWidth: 28,
     minHeight: 28,
   },
+  publishDraftButton: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    backgroundColor: '#10b981',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  publishDraftButtonText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
   teaserVideo: {
     position: 'absolute',
     top: 0,
@@ -1288,6 +1619,9 @@ const styles = StyleSheet.create({
   },
   menuItemDanger: {
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  },
+  menuItemPrimary: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
   },
   menuItemText: {
     color: '#fff',

@@ -23,6 +23,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ReportModal from '@/components/ReportModal';
+import { getPostMediaUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -47,6 +48,24 @@ export default function PostDetailScreen() {
     try {
       setLoading(true);
       const response = await postsApi.getById(id as string);
+      
+      // Log post structure for debugging
+      if (__DEV__) {
+        console.log('📥 [fetchPost] API Response:', {
+          status: response.status,
+          post: response.data ? {
+            id: response.data.id,
+            type: response.data.type,
+            video_url: response.data.video_url,
+            image: response.data.image,
+            imageUrl: response.data.imageUrl,
+            fullUrl: (response.data as any).fullUrl,
+            allKeys: Object.keys(response.data),
+          } : null,
+          fullPost: response.data,
+        });
+      }
+      
       if (response.status === 'success' && response.data) {
         setPost(response.data);
       }
@@ -161,7 +180,7 @@ export default function PostDetailScreen() {
     try {
       await Share.share({
         message: post?.caption || '',
-        url: post?.video_url || post?.image || '',
+        url: getPostMediaUrl(post) || '',
         title: 'Check out this post on Talynk!'
       });
     } catch (error) {
@@ -190,7 +209,7 @@ export default function PostDetailScreen() {
 
   // Get media URL with fallbacks and validation
   const getMediaUrl = () => {
-    return post.video_url || post.videoUrl || post.image || post.imageUrl || post.fullUrl || null;
+    return getPostMediaUrl(post);
   };
   
   const mediaUrl = getMediaUrl();
@@ -201,8 +220,7 @@ export default function PostDetailScreen() {
   
   // Get avatar URL with validation
   const getAvatarUrl = (user: any) => {
-    const url = user?.profile_picture || user?.avatar || user?.authorProfilePicture || null;
-    return url && url.trim() !== '' ? url : 'https://via.placeholder.com/32';
+    return getProfilePictureUrl(user) || 'https://via.placeholder.com/32';
   };
 
   return (

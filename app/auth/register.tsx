@@ -404,8 +404,7 @@ export default function RegisterScreen() {
   };
 
   const openTerms = () => {
-    // You can replace this with your actual terms URL
-    Linking.openURL('https://talynk.com/terms');
+    router.push({ pathname: '/auth/terms' as any });
   };
 
   const validateStep = (s: number) => {
@@ -708,13 +707,13 @@ export default function RegisterScreen() {
                   style={[
                     styles.checkbox,
                     {
-                      borderColor: agreed ? C.primary : C.inputBorder,
-                      backgroundColor: agreed ? C.primary : 'transparent',
+                      borderColor: agreed ? '#ffffff' : '#ffffff',
+                      backgroundColor: agreed ? '#ffffff' : 'transparent',
                     }
                   ]}
                   hitSlop={10}
                 >
-                  {agreed && <Ionicons name="checkmark" size={16} color="#fff" />}
+                  {agreed && <Ionicons name="checkmark" size={16} color="#000000" />}
                 </Pressable>
                 <Text style={[styles.termsText, { color: C.text }]}> 
                   I agree to the{' '}

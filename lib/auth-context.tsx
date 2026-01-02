@@ -102,13 +102,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dispatch({ type: 'SET_USER', payload: user });
         return true;
       } else {
-        console.error('Login failed:', response.message);
-        dispatch({ type: 'SET_ERROR', payload: response.message });
+        // Extract user-friendly error message
+        let errorMessage = response.message || 'Login failed. Please try again.';
+        
+        // Handle specific error cases
+        if (errorMessage.includes('Invalid credentials') || errorMessage.includes('401')) {
+          errorMessage = 'Invalid credentials';
+        } else if (errorMessage.includes('Network') || errorMessage.includes('timeout')) {
+          errorMessage = 'Network error. Please check your connection and try again.';
+        } else if (errorMessage.includes('500') || errorMessage.includes('Server')) {
+          errorMessage = 'Server error. Please try again later.';
+        }
+        
+        console.error('Login failed:', errorMessage);
+        dispatch({ type: 'SET_ERROR', payload: errorMessage });
         return false;
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login error:', error);
-      dispatch({ type: 'SET_ERROR', payload: 'Login failed. Please try again.' });
+      
+      // Extract error message from various error formats
+      let errorMessage = 'Login failed. Please try again.';
+      
+      if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
+      // Handle specific error cases
+      if (errorMessage.includes('Invalid credentials') || errorMessage.includes('401')) {
+        errorMessage = 'Invalid credentials';
+      } else if (errorMessage.includes('Network') || errorMessage.includes('timeout')) {
+        errorMessage = 'Network error. Please check your connection and try again.';
+      }
+      
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
       return false;
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });

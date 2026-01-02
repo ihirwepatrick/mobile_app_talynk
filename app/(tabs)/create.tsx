@@ -719,7 +719,7 @@ export default function CreatePostScreen() {
   };
 
   // --- SUBMIT ---
-  const handleCreatePost = async (status: 'pending' | 'draft' = 'pending') => {
+  const handleCreatePost = async (status: 'active' | 'draft' = 'active') => {
     if (!isAuthenticated || !user) {
       Alert.alert(
         'Authentication Required',
@@ -848,7 +848,7 @@ export default function CreatePostScreen() {
               
               const successMessage = status === 'draft' 
                 ? 'Draft saved successfully! You can publish it later from your profile.'
-                : 'Post created successfully! It will be reviewed and appear in your profile.';
+                : 'Post published successfully! It is now live and visible to all users.';
               
               Alert.alert(
                 'Success', 
@@ -1453,7 +1453,7 @@ export default function CreatePostScreen() {
                   style={[styles.quickActionButton, styles.quickPublishButton, (uploading || !caption.trim() || !selectedCategoryId) && styles.quickActionButtonDisabled]}
                   onPress={() => {
                     if (caption.trim() && selectedCategoryId) {
-                      handleCreatePost('pending');
+                      handleCreatePost('active');
                     } else {
                       Alert.alert(
                         'Complete Details',
