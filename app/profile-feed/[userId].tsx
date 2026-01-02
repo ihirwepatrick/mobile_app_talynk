@@ -438,9 +438,9 @@ const PostItem: React.FC<PostItemProps> = ({
           </View>
         )}
 
-        {/* Video progress bar */}
+        {/* Video progress bar - positioned above bottom info */}
         {isVideo && !useNativeControls && isActive && videoDuration > 0 && (
-          <View style={styles.progressBarContainer}>
+          <View style={[styles.progressBarContainer, { bottom: Math.max(insets.bottom + 100, 120) }]}>
             <View style={[styles.progressBar, { width: `${videoProgress * 100}%` }]} />
           </View>
         )}
@@ -495,8 +495,8 @@ const PostItem: React.FC<PostItemProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Bottom Info */}
-        <View style={[styles.bottomInfo, { bottom: -20 + insets.bottom }]}>
+        {/* Bottom Info - positioned with proper spacing */}
+        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom, 16) }]}>
           <View style={styles.bottomInfoContent}>
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
@@ -1046,12 +1046,17 @@ const styles = StyleSheet.create({
   },
   postContainer: {
     width: screenWidth,
+    height: screenHeight,
     backgroundColor: '#000',
   },
   mediaContainer: {
     width: '100%',
+    height: screenHeight,
     backgroundColor: '#000',
     position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
   },
   mediaWrapper: {
     flex: 1,
@@ -1098,10 +1103,10 @@ const styles = StyleSheet.create({
   },
   progressBarContainer: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
-    height: 2,
+    height: 3,
+    zIndex: 15,
     backgroundColor: 'rgba(255,255,255,0.3)',
   },
   progressBar: {
@@ -1120,9 +1125,10 @@ const styles = StyleSheet.create({
   actionsContainer: {
     position: 'absolute',
     right: 12,
-    bottom: 120,
+    bottom: 100,
     alignItems: 'center',
     gap: 20,
+    zIndex: 10,
   },
   avatarContainer: {
     marginBottom: 8,
@@ -1147,10 +1153,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 12,
     right: 80,
-    bottom: 60,
+    bottom: 0,
+    zIndex: 10,
+    paddingBottom: 8,
+    maxHeight: '40%', // Ensure it doesn't take too much space
   },
   bottomInfoContent: {
     marginBottom: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 12,
+    padding: 12,
+    maxWidth: '100%',
   },
   username: {
     color: '#fff',
@@ -1175,12 +1188,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   categoryBadge: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    backgroundColor: 'rgba(96, 165, 250, 0.8)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
     alignSelf: 'flex-start',
-    marginTop: 8,
+    marginTop: 4,
+    marginBottom: 8,
   },
   categoryText: {
     color: '#fff',

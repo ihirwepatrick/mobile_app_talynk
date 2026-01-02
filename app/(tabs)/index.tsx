@@ -498,9 +498,9 @@ const PostItem: React.FC<PostItemProps> = ({
           </TouchableOpacity>
         )}
 
-        {/* Video Progress Bar - at bottom edge */}
+        {/* Video Progress Bar - at bottom edge, above bottom info */}
         {isVideo && !useNativeControls && videoDuration > 0 && (
-          <View style={styles.progressBarContainer}>
+          <View style={[styles.progressBarContainer, { bottom: Math.max(insets.bottom + 100, 120) }]}>
             <View style={styles.progressBarTrack}>
               <View 
                 style={[
@@ -512,8 +512,8 @@ const PostItem: React.FC<PostItemProps> = ({
           </View>
         )}
 
-        {/* Right Side Actions - TikTok style, positioned lower */}
-        <View style={[styles.rightActions, { bottom: -20 + insets.bottom }]}>
+        {/* Right Side Actions - TikTok style, positioned with proper spacing */}
+        <View style={[styles.rightActions, { bottom: Math.max(insets.bottom + 60, 80) }]}>
           {/* User Avatar */}
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
             <Image 
@@ -581,8 +581,8 @@ const PostItem: React.FC<PostItemProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Bottom Info - positioned lower */}
-        <View style={[styles.bottomInfo, { bottom: -20 + insets.bottom }]}>
+        {/* Bottom Info - positioned with proper spacing */}
+        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom, 16) }]}>
           <View style={styles.bottomInfoContent}>
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
@@ -1155,10 +1155,12 @@ const styles = StyleSheet.create({
   },
   postContainer: {
     width: screenWidth,
+    height: screenHeight,
     backgroundColor: '#000',
   },
   mediaContainer: {
     width: screenWidth,
+    height: screenHeight,
     position: 'relative',
     backgroundColor: '#000',
     justifyContent: 'center',
@@ -1246,12 +1248,15 @@ const styles = StyleSheet.create({
     bottom: 0,
     zIndex: 10,
     backgroundColor: 'transparent',
+    paddingBottom: 8,
+    maxHeight: '40%', // Ensure it doesn't take too much space
   },
   bottomInfoContent: {
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     borderRadius: 12,
     padding: 12,
     marginBottom: 8,
+    maxWidth: '100%',
   },
   username: {
     color: '#fff',
@@ -1294,7 +1299,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    marginBottom: 12,
+    marginBottom: 8,
+    marginTop: 4,
   },
   categoryText: {
     color: '#fff',
@@ -1359,11 +1365,12 @@ const styles = StyleSheet.create({
   },
   progressBarContainer: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
+    bottom: 0,
     height: 3,
-    zIndex: 10,
+    zIndex: 15,
+    paddingHorizontal: 0,
   },
   progressBarTrack: {
     width: '100%',
