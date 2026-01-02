@@ -158,6 +158,14 @@ const PostItem: React.FC<PostItemProps> = ({
 }) => {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  
+  // Calculate available height (screen - header - bottom nav)
+  const headerContentHeight = 50;
+  const headerPaddingBottom = 8;
+  const headerHeight = insets.top + headerContentHeight + headerPaddingBottom;
+  const bottomNavHeight = 60 + insets.bottom;
+  const availableHeight = screenHeight - headerHeight - bottomNavHeight;
+  
   const { user } = useAuth();
   const { sendLikeAction } = useRealtime();
   const dispatch = useAppDispatch();
@@ -385,11 +393,11 @@ const PostItem: React.FC<PostItemProps> = ({
 
   return (
     <View 
-      style={[styles.postContainer, { height: screenHeight }]}
+      style={[styles.postContainer, { height: availableHeight }]}
       pointerEvents="box-none"
     >
       {/* Media */}
-      <View style={[styles.mediaContainer, { height: screenHeight, width: screenWidth }]}>
+      <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
         {isVideo ? (
           videoError || !isActive ? (
             // Show thumbnail when video has error OR when not active (memory optimization)
@@ -406,7 +414,7 @@ const PostItem: React.FC<PostItemProps> = ({
               {mediaUrl ? (
                 <Image
                   source={{ uri: getThumbnailUrl(item) || mediaUrl }}
-                  style={[styles.media, { width: screenWidth, height: screenHeight }]}
+                  style={[styles.media, { width: screenWidth, height: availableHeight }]}
                   resizeMode="cover"
                   onLoadStart={() => setImageLoading(true)}
                   onLoad={() => {
@@ -447,7 +455,7 @@ const PostItem: React.FC<PostItemProps> = ({
               <Video
                 ref={videoRef}
                 source={{ uri: mediaUrl || '' }}
-                style={styles.media}
+                style={[styles.media, { width: screenWidth, height: availableHeight }]}
                 resizeMode={ResizeMode.COVER}
                 shouldPlay={useNativeControls ? false : !decoderErrorDetected}
                 isLooping={!useNativeControls}
@@ -509,7 +517,7 @@ const PostItem: React.FC<PostItemProps> = ({
             {mediaUrl && !imageError ? (
               <Image
                 source={{ uri: mediaUrl }}
-                style={[styles.media, { width: screenWidth, height: screenHeight }]}
+                style={[styles.media, { width: screenWidth, height: availableHeight }]}
                 resizeMode="cover"
                 onLoadStart={() => setImageLoading(true)}
                 onLoad={() => {
@@ -540,7 +548,7 @@ const PostItem: React.FC<PostItemProps> = ({
         )}
 
         {/* Right Side Actions - TikTok style, positioned with proper spacing */}
-        <View style={[styles.rightActions, { bottom: Math.max(insets.bottom + 70, 86) }]}>
+        <View style={[styles.rightActions, { bottom: Math.max(insets.bottom + 65, 81) }]}>
           {/* User Avatar */}
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
             <Image 
@@ -609,7 +617,7 @@ const PostItem: React.FC<PostItemProps> = ({
         </View>
 
         {/* Bottom Info - positioned above progress bar and bottom navbar */}
-        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom + 70, 86) }]}>
+        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom + 65, 81) }]}>
           <View style={styles.bottomInfoContent}>
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
@@ -699,11 +707,13 @@ export default function FeedScreen() {
   // Efficient likes manager for batch checking
   const likesManager = useLikesManager();
   
-  // Use full screen height for posts - header is absolutely positioned
+  // Calculate available height for posts (screen height - header - bottom navbar)
   // Header: insets.top (safe area) + ~50px (tabs content) + 8px (paddingBottom)
   const headerContentHeight = 50; // Tabs container height
   const headerPaddingBottom = 8;
   const headerHeight = insets.top + headerContentHeight + headerPaddingBottom;
+  const bottomNavHeight = 60 + insets.bottom; // Bottom navbar height
+  const availableHeight = screenHeight - headerHeight - bottomNavHeight;
 
   const INITIAL_LIMIT = 10; // Reduced initial load for faster response
   const LOAD_MORE_LIMIT = 10; // Load 10 more posts at a time
@@ -1063,7 +1073,7 @@ export default function FeedScreen() {
           keyExtractor={(item) => item.id}
           pagingEnabled
           showsVerticalScrollIndicator={false}
-          snapToInterval={screenHeight}
+          snapToInterval={availableHeight}
           snapToAlignment="start"
           decelerationRate="fast"
           contentContainerStyle={{ paddingBottom: 0 }}
@@ -1080,8 +1090,8 @@ export default function FeedScreen() {
           updateCellsBatchingPeriod={50}
           removeClippedSubviews={false}
           getItemLayout={(data, index) => ({
-            length: screenHeight,
-            offset: screenHeight * index,
+            length: availableHeight,
+            offset: availableHeight * index,
             index,
           })}
           refreshControl={
@@ -1163,11 +1173,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingBottom: 8,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.95)',
     zIndex: 100,
   },
   tabsContainer: {
