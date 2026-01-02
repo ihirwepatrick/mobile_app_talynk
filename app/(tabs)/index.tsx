@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Image,
-  Dimensions,
+  useWindowDimensions,
   StatusBar,
   Share,
   Animated,
@@ -39,8 +39,6 @@ import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
-
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 // Global mute context
 const MuteContext = createContext({ isMuted: false, setIsMuted: (v: boolean) => {} });
@@ -156,9 +154,10 @@ const PostItem: React.FC<PostItemProps> = ({
   onUnfollow,
   isLiked, 
   isFollowing,
-  isActive,
-  availableHeight
+  isActive
 }) => {
+  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { sendLikeAction } = useRealtime();
   const dispatch = useAppDispatch();
@@ -192,7 +191,8 @@ const PostItem: React.FC<PostItemProps> = ({
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
   const [videoProgress, setVideoProgress] = useState(0); // 0-1
   const [videoDuration, setVideoDuration] = useState(0); // in milliseconds
-  const insets = useSafeAreaInsets();
+  const [imageLoading, setImageLoading] = useState(true);
+  const [videoLoading, setVideoLoading] = useState(true);
   
   // Like animation
   const likeScale = useRef(new Animated.Value(1)).current;
@@ -216,6 +216,16 @@ const PostItem: React.FC<PostItemProps> = ({
   
   const isVideo = item.type === 'video' || !!item.video_url || 
     (mediaUrl !== null && (mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm')));
+
+  // Reset loading states when post becomes active/inactive
+  useEffect(() => {
+    if (isActive && isVideo) {
+      setVideoLoading(true);
+    } else if (!isActive) {
+      setVideoLoading(false);
+      setImageLoading(false);
+    }
+  }, [isActive, isVideo]);
 
   // Simple video play/pause control - KISS principle
   useEffect(() => {
@@ -374,9 +384,9 @@ const PostItem: React.FC<PostItemProps> = ({
   };
 
   return (
-    <View style={[styles.postContainer, { height: availableHeight }]}>
+    <View style={[styles.postContainer, { height: screenHeight }]}>
       {/* Media */}
-      <View style={[styles.mediaContainer, { height: availableHeight }]}>
+      <View style={[styles.mediaContainer, { height: screenHeight }]}>
         {isVideo ? (
           videoError || !isActive ? (
             // Show thumbnail when video has error OR when not active (memory optimization)
@@ -385,13 +395,23 @@ const PostItem: React.FC<PostItemProps> = ({
               activeOpacity={1} 
               onPress={handleVideoTap}
             >
+              {imageLoading && !imageError && mediaUrl && (
+                <View style={styles.loadingOverlay}>
+                  <ActivityIndicator size="large" color="#60a5fa" />
+                </View>
+              )}
               {mediaUrl ? (
                 <Image
                   source={{ uri: getThumbnailUrl(item) || mediaUrl }}
                   style={styles.media}
                   resizeMode="cover"
+                  onLoadStart={() => setImageLoading(true)}
+                  onLoad={() => {
+                    setImageLoading(false);
+                  }}
                   onError={() => {
                     setImageError(true);
+                    setImageLoading(false);
                   }}
                 />
               ) : (
@@ -416,6 +436,11 @@ const PostItem: React.FC<PostItemProps> = ({
               activeOpacity={1} 
               onPress={handleVideoTap}
             >
+              {videoLoading && !videoLoaded && (
+                <View style={styles.loadingOverlay}>
+                  <ActivityIndicator size="large" color="#60a5fa" />
+                </View>
+              )}
               <Video
                 ref={videoRef}
                 source={{ uri: mediaUrl || '' }}
@@ -427,8 +452,12 @@ const PostItem: React.FC<PostItemProps> = ({
                 usePoster={false}
                 shouldCorrectPitch={true}
                 volume={useNativeControls ? 1.0 : (isMuted ? 0.0 : 1.0)}
+                onLoadStart={() => {
+                  setVideoLoading(true);
+                }}
                 onLoad={() => {
                   setVideoLoaded(true);
+                  setVideoLoading(false);
                   if (!useNativeControls && videoRef.current) {
                     pauseAllVideosExcept(videoRef.current).then(() => {
                       videoRef.current?.playAsync().catch(() => {});
@@ -469,15 +498,24 @@ const PostItem: React.FC<PostItemProps> = ({
           )
         ) : (
           <View style={styles.mediaWrapper}>
+            {imageLoading && !imageError && (
+              <View style={styles.loadingOverlay}>
+                <ActivityIndicator size="large" color="#60a5fa" />
+              </View>
+            )}
             {mediaUrl && !imageError ? (
               <Image
                 source={{ uri: mediaUrl }}
                 style={styles.media}
                 resizeMode="cover"
+                onLoadStart={() => setImageLoading(true)}
+                onLoad={() => {
+                  setImageLoading(false);
+                }}
                 onError={() => {
                   setImageError(true);
+                  setImageLoading(false);
                 }}
-                onLoad={() => {}}
               />
             ) : (
               <View style={[styles.media, styles.placeholderContainer]}>
@@ -499,7 +537,7 @@ const PostItem: React.FC<PostItemProps> = ({
         )}
 
         {/* Right Side Actions - TikTok style, positioned with proper spacing */}
-        <View style={[styles.rightActions, { bottom: Math.max(insets.bottom + 60, 80) }]}>
+        <View style={[styles.rightActions, { bottom: Math.max(insets.bottom + 70, 86) }]}>
           {/* User Avatar */}
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
             <Image 
@@ -567,8 +605,8 @@ const PostItem: React.FC<PostItemProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Bottom Info - positioned above progress bar */}
-        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom + 5, 21) }]}>
+        {/* Bottom Info - positioned above progress bar and bottom navbar */}
+        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom + 70, 86) }]}>
           <View style={styles.bottomInfoContent}>
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
@@ -610,9 +648,9 @@ const PostItem: React.FC<PostItemProps> = ({
           )}
         </View>
 
-        {/* Video Progress Bar - at the very bottom edge */}
+        {/* Video Progress Bar - at the very bottom edge, above bottom navbar */}
         {isVideo && !useNativeControls && videoDuration > 0 && (
-          <View style={[styles.progressBarContainer, { bottom: insets.bottom }]}>
+          <View style={[styles.progressBarContainer, { bottom: Math.max(insets.bottom + 60, 76) }]}>
             <View style={styles.progressBarTrack}>
               <View 
                 style={[
@@ -653,18 +691,16 @@ export default function FeedScreen() {
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
   const insets = useSafeAreaInsets();
+  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   
   // Efficient likes manager for batch checking
   const likesManager = useLikesManager();
   
-  // Calculate available height for posts (screen height - header - bottom navbar)
+  // Use full screen height for posts - header is absolutely positioned
   // Header: insets.top (safe area) + ~50px (tabs content) + 8px (paddingBottom)
-  // Bottom navbar: 60px + insets.bottom
   const headerContentHeight = 50; // Tabs container height
   const headerPaddingBottom = 8;
   const headerHeight = insets.top + headerContentHeight + headerPaddingBottom;
-  const bottomNavHeight = 60 + insets.bottom; // Bottom navbar height
-  const availableHeight = screenHeight - headerHeight - bottomNavHeight;
 
   const INITIAL_LIMIT = 10; // Reduced initial load for faster response
   const LOAD_MORE_LIMIT = 10; // Load 10 more posts at a time
@@ -1019,26 +1055,27 @@ export default function FeedScreen() {
               isLiked={likedPosts.includes(item.id)}
               isFollowing={followedUsers.has(item.user?.id || '')}
               isActive={isScreenFocused && currentIndex === index}
-              availableHeight={availableHeight}
             />
           )}
           keyExtractor={(item) => item.id}
           pagingEnabled
           showsVerticalScrollIndicator={false}
-          snapToInterval={availableHeight}
+          snapToInterval={screenHeight}
           snapToAlignment="start"
           decelerationRate="fast"
-          style={{ marginTop: headerHeight }}
           contentContainerStyle={{ paddingBottom: 0 }}
+          // Smooth scrolling optimizations
+          scrollEventThrottle={16}
+          disableIntervalMomentum={true}
           // Lazy loading optimizations for better performance
-          windowSize={2}
-          initialNumToRender={1}
-          maxToRenderPerBatch={1}
-          updateCellsBatchingPeriod={100}
-          removeClippedSubviews={true}
+          windowSize={3}
+          initialNumToRender={2}
+          maxToRenderPerBatch={2}
+          updateCellsBatchingPeriod={50}
+          removeClippedSubviews={false}
           getItemLayout={(data, index) => ({
-            length: availableHeight,
-            offset: availableHeight * index,
+            length: screenHeight,
+            offset: screenHeight * index,
             index,
           })}
           refreshControl={
@@ -1154,13 +1191,11 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   postContainer: {
-    width: screenWidth,
-    height: screenHeight,
+    width: '100%',
     backgroundColor: '#000',
   },
   mediaContainer: {
-    width: screenWidth,
-    height: screenHeight,
+    width: '100%',
     position: 'relative',
     backgroundColor: '#000',
     justifyContent: 'center',
@@ -1323,7 +1358,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    height: screenHeight,
     backgroundColor: '#000000',
   },
   emptyText: {
@@ -1353,6 +1387,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 5,
   },
   playIconCircle: {
     width: 72,
