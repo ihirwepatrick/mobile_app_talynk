@@ -1047,20 +1047,19 @@ const styles = StyleSheet.create({
   },
   postContainer: {
     width: screenWidth,
-    height: screenHeight,
     backgroundColor: '#000',
   },
   mediaContainer: {
-    width: '100%',
-    height: screenHeight,
-    backgroundColor: '#000',
+    width: screenWidth,
     position: 'relative',
+    backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
   },
   mediaWrapper: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#000',
@@ -1068,6 +1067,7 @@ const styles = StyleSheet.create({
   media: {
     width: '100%',
     height: '100%',
+    backgroundColor: '#000',
   },
   placeholderContainer: {
     justifyContent: 'center',
