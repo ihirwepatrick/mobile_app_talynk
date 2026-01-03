@@ -25,6 +25,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "newArchEnabled": true,
       "edgeToEdgeEnabled": true,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
@@ -74,7 +75,8 @@
             "useFrameworks": "dynamic"
           }
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
@@ -87,3 +89,11 @@
     }
   }
 }
+
+
+
+
+
+
+
+

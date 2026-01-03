@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Image,
   Modal,
+  Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
@@ -161,6 +162,8 @@ export default function CreatePostScreen() {
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
   const videoRef = useRef<Video>(null);
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
 
   // --- AUTHENTICATION CHECK ---
   useEffect(() => {
@@ -686,29 +689,50 @@ export default function CreatePostScreen() {
     handleRecordVideo();
   };
 
+  // --- TOAST MESSAGE ---
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    Animated.sequence([
+      Animated.timing(toastOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.delay(2500),
+      Animated.timing(toastOpacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setToastMessage(null);
+    });
+  };
+
   // --- VALIDATION ---
   const validate = async () => {
     const newErrors: { [k: string]: string } = {};
     if (!caption.trim()) {
       newErrors.caption = 'Caption is required';
+      showToast('Caption is required');
     }
     if (!selectedGroup) {
       newErrors.group = 'Please select a category group';
+      if (!newErrors.caption) {
+        showToast('Please select a category group');
+      }
     }
     if (!selectedCategoryId) {
       newErrors.category = 'Please select a specific category';
+      if (!newErrors.caption && !newErrors.group) {
+        showToast('Please select a specific category');
+      }
     }
     if (!recordedVideoUri && !editedVideoUri && !capturedImageUri) {
       newErrors.media = 'Please record a video or take a picture';
     }
     
     setErrors(newErrors);
-    
-    // Show error alert if validation fails
-    if (Object.keys(newErrors).length > 0) {
-      const errorMessages = Object.values(newErrors).join('\n');
-      Alert.alert('Missing Required Information', errorMessages);
-    }
     
     return Object.keys(newErrors).length === 0;
   };
@@ -1482,11 +1506,11 @@ export default function CreatePostScreen() {
                     if (caption.trim() && selectedCategoryId) {
                       await handleCreatePost('draft');
                     } else {
-                      Alert.alert(
-                        'Complete Details',
-                        'Please add a caption and select a category to save as draft.',
-                        [{ text: 'OK' }]
-                      );
+                      if (!caption.trim()) {
+                        showToast('Caption is required');
+                      } else if (!selectedCategoryId) {
+                        showToast('Please select a category');
+                      }
                     }
                   }}
                   disabled={uploading || !currentMediaUri || !caption.trim() || !selectedCategoryId}
@@ -1536,6 +1560,31 @@ export default function CreatePostScreen() {
           </View>
         </ScrollView>
         </KeyboardAvoidingView>
+      )}
+
+      {/* Toast Message */}
+      {toastMessage && (
+        <Animated.View
+          style={[
+            styles.toastContainer,
+            {
+              opacity: toastOpacity,
+              transform: [
+                {
+                  translateY: toastOpacity.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-50, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <View style={[styles.toastContent, { backgroundColor: C.errorBg, borderColor: C.errorBorder }]}>
+            <MaterialIcons name="error-outline" size={20} color={C.error} />
+            <Text style={[styles.toastText, { color: C.error }]}>{toastMessage}</Text>
+          </View>
+        </Animated.View>
       )}
     </View>
   );
@@ -2324,5 +2373,35 @@ const styles = StyleSheet.create({
   compositeImage: {
     width: '100%',
     height: '100%',
+  },
+  toastContainer: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    right: 20,
+    zIndex: 9999,
+    alignItems: 'center',
+  },
+  toastContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  toastText: {
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
   },
 });
