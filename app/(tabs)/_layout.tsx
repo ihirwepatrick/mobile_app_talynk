@@ -1,10 +1,11 @@
 import React from 'react';
 import { Tabs, router } from 'expo-router';
-import { View, TouchableOpacity, useColorScheme } from 'react-native';
+import { View, TouchableOpacity, useColorScheme, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 
 import RealtimeProvider from '@/lib/realtime-context';
+import { NotificationBadgeProvider, useNotificationBadge } from '@/lib/notification-badge-context';
 
 function CustomTabBar({ state, descriptors, navigation }: { state: any; descriptors: any; navigation: any }) {
   const insets = useSafeAreaInsets();
@@ -12,6 +13,7 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
   const active = '#ffffff';
   const inactive = '#666666';
   const primary = '#60a5fa';
+  const { unreadCount } = useNotificationBadge();
 
   const icons = [
     <Feather name="home" size={26} />, // Feed
@@ -61,17 +63,30 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
         }
 
         // Other tabs
+        const isNotificationsTab = idx === 3; // Notifications is at index 3
+        
         return (
           <TouchableOpacity
             key={route.key}
             onPress={onPress}
             activeOpacity={0.8}
-            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: 50 }}
+            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: 50, position: 'relative' }}
           >
             {React.cloneElement(icons[idx], { 
               color: isFocused ? active : inactive,
               size: isFocused ? 28 : 24
             })}
+            
+            {/* Notification Badge - Only show on notifications tab when there are unread notifications */}
+            {isNotificationsTab && unreadCount > 0 && (
+              <View style={styles.badge}>
+                {unreadCount > 9 ? (
+                  <Text style={styles.badgeTextPlus}>+</Text>
+                ) : (
+                  <Text style={styles.badgeText}>{unreadCount}</Text>
+                )}
+              </View>
+            )}
           </TouchableOpacity>
         );
       })}
@@ -83,19 +98,54 @@ export default function TabLayout() {
   return (
     <View style={{ flex: 1, backgroundColor: '#000000' }}>
       <RealtimeProvider>
-        <Tabs
-          tabBar={props => <CustomTabBar {...props} />}
-          screenOptions={{
-            headerShown: false,
-          }}
-        >
-          <Tabs.Screen name="index" />
-          <Tabs.Screen name="explore" />
-          <Tabs.Screen name="create" />
-          <Tabs.Screen name="notifications" />
-          <Tabs.Screen name="profile" />
-        </Tabs>
+        <NotificationBadgeProvider>
+          <Tabs
+            tabBar={props => <CustomTabBar {...props} />}
+            screenOptions={{
+              headerShown: false,
+            }}
+          >
+            <Tabs.Screen name="index" />
+            <Tabs.Screen name="explore" />
+            <Tabs.Screen name="create" />
+            <Tabs.Screen name="notifications" />
+            <Tabs.Screen name="profile" />
+          </Tabs>
+        </NotificationBadgeProvider>
       </RealtimeProvider>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  badge: {
+    position: 'absolute',
+    top: 2,
+    right: '50%',
+    marginRight: -18, // Position badge to the right of center, above the icon
+    backgroundColor: '#ef4444',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#000000',
+    zIndex: 10,
+  },
+  badgeText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 14,
+    textAlign: 'center',
+  },
+  badgeTextPlus: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 14,
+    textAlign: 'center',
+  },
+});

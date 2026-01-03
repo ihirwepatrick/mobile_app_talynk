@@ -205,6 +205,7 @@ class WebSocketService extends SimpleEventEmitter {
 
       case 'like':
       case 'likeUpdate':
+      case 'post:likeToggled': // Per NOTIFICATIONS&REPORTING.md
         this.emit('likeUpdate', data as LikeUpdate);
         this.emit('postUpdate', {
           postId: data.postId,
@@ -224,8 +225,9 @@ class WebSocketService extends SimpleEventEmitter {
 
       case 'notification':
       case 'newNotification':
+      case 'notification:created': // Per NOTIFICATIONS&REPORTING.md
         // Handle both formats from NOTIFICATIONS.md:
-        // Format 1: { type: "newNotification", data: { notification: {...} } }
+        // Format 1: { type: "notification:created", data: { notification: {...} } }
         // Format 2: { type: "notification", data: { notification: {...} } }
         const notificationData = (data as any).notification || data;
         this.emit('newNotification', { notification: notificationData } as NotificationUpdate);

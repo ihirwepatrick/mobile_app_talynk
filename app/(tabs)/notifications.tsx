@@ -16,6 +16,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
 import { Notification } from '@/types';
+import { useNotificationBadge } from '@/lib/notification-badge-context';
 
 const NOTIFICATION_TABS = [
   { key: 'all', label: 'All' },
@@ -30,14 +31,17 @@ export default function NotificationsScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { isConnected, onNewNotification } = useRealtime();
+  const { refreshCount } = useNotificationBadge();
 
   // Load notifications on mount and when screen is focused
   useFocusEffect(
     useCallback(() => {
       if (user) {
         loadNotifications();
+        // Refresh badge count when screen is focused
+        refreshCount();
       }
-    }, [user])
+    }, [user, refreshCount])
   );
 
   // Subscribe to real-time notifications
@@ -113,6 +117,8 @@ export default function NotificationsScreen() {
         setNotifications(prev =>
           prev.map(notification => ({ ...notification, isRead: true }))
         );
+        // Refresh badge count
+        refreshCount();
       }
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
@@ -145,9 +151,11 @@ export default function NotificationsScreen() {
       case 'post_unfrozen':
         return { name: 'lock-open', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
       case 'post_appeal':
-      case 'appeal_approved':
-      case 'appeal_rejected':
         return { name: 'gavel', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' };
+      case 'appeal_approved':
+        return { name: 'check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
+      case 'appeal_rejected':
+        return { name: 'cancel', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
       case 'post_featured':
         return { name: 'star', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)' };
       case 'broadcast':
@@ -180,21 +188,55 @@ export default function NotificationsScreen() {
   };
 
   const handleNotificationPress = (item: Notification) => {
-    // Navigate based on notification type and related data
-    if (item.related_post_id) {
-      router.push({
-        pathname: '/post/[id]',
-        params: { id: item.related_post_id }
-      });
-    } else if (item.related_user_id) {
-      router.push({
-        pathname: '/user/[id]',
-        params: { id: item.related_user_id }
-      });
-    } else if (item.type === 'follow' || item.type === 'subscription') {
-      // Navigate to user profile if available
-      const lowerMessage = item.message.toLowerCase();
-      // Could extract username from message if needed
+    // Navigate based on notification type per NOTIFICATIONS&REPORTING.md
+    switch (item.type) {
+      case 'post_flagged':
+      case 'appeal_approved':
+      case 'appeal_rejected':
+      case 'post_unfrozen':
+        // Navigate to user's posts screen (profile)
+        if (user?.id) {
+          router.push({
+            pathname: '/user/[id]',
+            params: { id: user.id }
+          });
+        }
+        break;
+      
+      case 'comment':
+        // Navigate to post detail
+        if (item.related_post_id) {
+          router.push({
+            pathname: '/post/[id]',
+            params: { id: item.related_post_id }
+          });
+        }
+        break;
+      
+      case 'follow':
+        // Navigate to user profile
+        if (item.related_user_id) {
+          router.push({
+            pathname: '/user/[id]',
+            params: { id: item.related_user_id }
+          });
+        }
+        break;
+      
+      default:
+        // Default navigation based on related data
+        if (item.related_post_id) {
+          router.push({
+            pathname: '/post/[id]',
+            params: { id: item.related_post_id }
+          });
+        } else if (item.related_user_id) {
+          router.push({
+            pathname: '/user/[id]',
+            params: { id: item.related_user_id }
+          });
+        }
+        break;
     }
   };
 

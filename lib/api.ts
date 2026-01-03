@@ -749,11 +749,11 @@ export const userApi = {
 export const notificationsApi = {
   /**
    * Get all notifications for the authenticated user
-   * GET /api/user/notifications
+   * GET /api/users/notifications
    */
   getAll: async (): Promise<ApiResponse<{ notifications: Notification[] }>> => {
     try {
-      const response = await apiClient.get('/api/user/notifications');
+      const response = await apiClient.get('/api/users/notifications');
       return response.data;
     } catch (error: any) {
       return {
@@ -766,11 +766,11 @@ export const notificationsApi = {
 
   /**
    * Toggle notification settings
-   * PUT /api/user/notifications
+   * PUT /api/users/notifications
    */
   toggleSettings: async (enabled: boolean): Promise<ApiResponse<any>> => {
     try {
-      const response = await apiClient.put('/api/user/notifications', { enabled });
+      const response = await apiClient.put('/api/users/notifications', { enabled });
       return response.data;
     } catch (error: any) {
       return {
@@ -783,11 +783,11 @@ export const notificationsApi = {
 
   /**
    * Mark all notifications as read
-   * PUT /api/user/notifications/read-all
+   * PUT /api/users/notifications/read-all
    */
   markAllAsRead: async (): Promise<ApiResponse<any>> => {
     try {
-      const response = await apiClient.put('/api/user/notifications/read-all');
+      const response = await apiClient.put('/api/users/notifications/read-all');
       return response.data;
     } catch (error: any) {
       return {
@@ -999,18 +999,20 @@ export const likesApi = {
   },
 };
 
-// Reports API (per API_DOC)
+// Reports API - Complete implementation per NOTIFICATIONS&REPORTING.md
 export const reportsApi = {
-  // Report a post
+  /**
+   * Report a post
+   * POST /api/reports/posts/:postId
+   */
   reportPost: async (postId: string, reason: string, description?: string): Promise<ApiResponse<any>> => {
     try {
       const response = await apiClient.post(`/api/reports/posts/${postId}`, {
         reason,
-        description: description || `Reported for: ${reason}`,
+        description: description || null,
       });
       return response.data;
     } catch (error: any) {
-      // Extract error message from different possible response structures
       const errorMessage = 
         error.response?.data?.data?.message || 
         error.response?.data?.message || 
@@ -1018,14 +1020,6 @@ export const reportsApi = {
         'Failed to report post';
       
       const isAlreadyReported = errorMessage.toLowerCase().includes('already reported');
-      
-      console.error('Report post API error:', {
-        message: errorMessage,
-        status: error.response?.status,
-        data: error.response?.data,
-        url: error.config?.url,
-        isAlreadyReported
-      });
       
       return {
         status: 'error',
@@ -1037,7 +1031,10 @@ export const reportsApi = {
     }
   },
 
-  // Get reports for a specific post (for users to see if they've already reported)
+  /**
+   * Get reports for a specific post
+   * GET /api/reports/posts/:postId
+   */
   getPostReports: async (postId: string): Promise<ApiResponse<{ reports: any[] }>> => {
     try {
       const response = await apiClient.get(`/api/reports/posts/${postId}`);
@@ -1047,6 +1044,43 @@ export const reportsApi = {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch post reports',
         data: { reports: [] },
+      };
+    }
+  },
+
+  /**
+   * Appeal a flagged post
+   * POST /api/reports/posts/:postId/appeal
+   */
+  appealPost: async (postId: string, appealReason: string, additionalInfo?: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.post(`/api/reports/posts/${postId}/appeal`, {
+        appealReason,
+        additionalInfo: additionalInfo || null,
+      });
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to submit appeal',
+        data: {},
+      };
+    }
+  },
+
+  /**
+   * Get user's appeals
+   * GET /api/reports/appeals/my?page=1&limit=10
+   */
+  getMyAppeals: async (page = 1, limit = 10): Promise<ApiResponse<{ appeals: any[]; pagination?: any }>> => {
+    try {
+      const response = await apiClient.get(`/api/reports/appeals/my?page=${page}&limit=${limit}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch appeals',
+        data: { appeals: [], pagination: {} },
       };
     }
   },
